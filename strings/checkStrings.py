@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*
 import json
 import sys
 import os.path as path
@@ -8,7 +9,7 @@ print()
 check_tags = True
 check_tokens = True
 check_leading_space = True
-check_periods = True
+check_periods = False
 check_numbers = True
 
 def led_spaces(str):
@@ -18,17 +19,18 @@ if len(sys.argv) < 2:
     print("inform locale key (example 'python checkString.py pt-BR')")
 else:
     locale = sys.argv[1]
+    print("start check {}".format(locale))
 
     if not path.isfile('strings.{}.json'.format(locale)):
         print("'strings.{}.json' not found. Create it before calling this script.".format(locale))
         exit()
 
-    with open('strings.json', encoding='utf-8') as default_file, \
-        open('strings.{}.json'.format(locale), encoding='utf-8') as loc_file:
+    with open('strings.json') as default_file, \
+        open('strings.{}.json'.format(locale)) as loc_file:
         defstr = json.load(default_file)
         
         json_regex = re.compile(r'"(?P<key>.+)"\s*:\s"(?P<value>.*)"\s*$')
-        period_count = re.compile(r'(\.(\D|$))|。')
+        period_count = re.compile(r'(\.(\D|$))|。|，')
         tokens_regex = re.compile(r'%\d+(?!\d)')
         numbers_regex = re.compile(r'\d+')
 
