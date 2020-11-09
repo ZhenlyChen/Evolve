@@ -3,6 +3,75 @@ import { clearElement } from './../functions.js';
 
 const changeList = [
     {
+        version: `1.0.1`,
+        date: `11/08/2020`,
+        changes: [
+            `Fixed display bug with CRISPR costs and Technocracy.`,
+            `Fixed issue with some Windmills not producing power.`,
+            `The Resort now properly formats its vault size.`
+        ]
+    },
+    {
+        version: `1.0.0`,
+        date: `11/07/2020`,
+        changes: [
+            `Expanded Interdimensional content, delve deep into the hell dimension.`,
+            `New Magic Universe.`,
+            `Fling asteroids into the blackhole with the Asteroid Redirect ARPA project.`,
+            `The same monument type will no longer be chosen twice in a row.`,
+            `Evil races can now construct a Pillar of Bones monument type.`,
+            `Democracy now only affects Entertainers.`,
+            `Some government bonuses now scale with tech era.`,
+            `Races with Detritivore can now build Windmills.`,
+            `Base Aluminium income for plant based species is now roughly 10% higher.`,
+            `Beast of Burden now grants an extra loot roll instead of a 10% boost.`,
+            `Revamped combat loot formulas.`,
+            `Build queue resource highlighting.`,
+            `Low Contrast Dark Night Theme.`,
+            `Ewnay igpay atinlay anguagelay.`
+        ]
+    },
+    {
+        version: `0.9.24`,
+        date: `11/1/2020`,
+        changes: [
+            `Holiday icons from feats earned with no stars can now be accessed.`,
+            `Challenge feat icons still require at least 1 star.`,
+        ]
+    },
+    {
+        version: `0.9.23`,
+        date: `10/30/2020`,
+        changes: [
+            `New settings option for people who hate fun.`,
+            `Added ability for an obscure combination of settings and racial traits to get Ghost #3`
+        ]
+    },
+    {
+        version: `0.9.22`,
+        date: `10/28/2020`,
+        changes: [
+            `Halloween cosmetic effects will now run for the duration of the Trick or Treat event instead of just on Halloween.`,
+            `Ents, Dryads, and Salamanders can now find all the Ghosts.`,
+            `A certain Ghost is now easier to obtain in Cataclysm.`,
+            `Accessibility improvements for the event.`
+        ]
+    },
+    {
+        version: `0.9.21`,
+        date: `10/27/2020`,
+        changes: [
+            `Trick or Treat Event, runs from 10/28 - 11/4.`,
+        ]
+    },
+    {
+        version: `0.9.20`,
+        date: `10/16/2020`,
+        changes: [
+            `Fixed bug with the holy trait that improperly applied its bonus.`
+        ]
+    },
+    {
         version: `0.9.19`,
         date: `9/1/2020`,
         changes: [
