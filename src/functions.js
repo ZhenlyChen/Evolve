@@ -1,8 +1,11 @@
-import { global, save, poppers, webWorker, achieve_level, universe_level, resizeGame } from './vars.js';
+import { global, save, poppers, webWorker, achieve_level, universe_level, resizeGame, clearStates } from './vars.js';
 import { loc } from './locale.js';
 import { races, traits, genus_traits } from './races.js';
 import { actions, actionDesc } from './actions.js';
+import { universe_affixes } from './space.js';
 import { arpaAdjustCosts, arpaProjectCosts } from './arpa.js';
+import { gridDefs } from './industry.js';
+import { unlockAchieve, unlockFeat, checkAchievements } from './achieve.js';
 
 export function mainVue(){
     vBind({
@@ -28,33 +31,19 @@ export function mainVue(){
                     importGame(restore_data,true);
                 }
             },
-            lChange(){
-                global.settings.locale = $('#localization select').children("option:selected").val();
+            lChange(locale){
+                global.settings.locale = locale;
+                global.queue.rename = true;
                 save.setItem('evolved',LZString.compressToUTF16(JSON.stringify(global)));
                 if (webWorker.w){
                     webWorker.w.terminate();
                 }
                 window.location.reload();
             },
-            dark(){
-                global.settings.theme = 'dark';
+            setTheme(theme){
+                global.settings.theme = theme;
                 $('html').removeClass();
-                $('html').addClass('dark');
-            },
-            light(){
-                global.settings.theme = 'light';
-                $('html').removeClass();
-                $('html').addClass('light');
-            },
-            night(){
-                global.settings.theme = 'night';
-                $('html').removeClass();
-                $('html').addClass('night');
-            },
-            redgreen(){
-                global.settings.theme = 'redgreen';
-                $('html').removeClass();
-                $('html').addClass('redgreen');
+                $('html').addClass(theme);
             },
             si(){
                 global.settings.affix = 'si';
@@ -96,6 +85,9 @@ export function mainVue(){
             },
             expose(){
                 return loc('settings8');
+            },
+            boring(){
+                return loc('settings10');
             },
             restoreData(){
                 return loc('settings9');
@@ -167,6 +159,7 @@ export function popover(id,content,opts){
     if (!opts.hasOwnProperty('unbind')){ opts['unbind'] = true; }
     if (opts['bind']){
         $(opts.elm).on('mouseover',function(){
+            $('.popper').hide();
             let wide = opts['wide'] ? ' wide' : '';
             let classes = opts['classes'] ? opts['classes'] : `has-background-light has-text-dark pop-desc`;
             var popper = $(`<div id="pop${id}" class="popper${wide} ${classes}"></div>`);
@@ -179,8 +172,12 @@ export function popover(id,content,opts){
             if (content){
                 popper.append(typeof content === 'function' ? content({ this: this, popper: popper }) : content);
             }
+            poppers[id] = new Popper(
+                opts['self'] ? this : $(opts.elm),
+                popper,
+                opts.hasOwnProperty('prop') ? opts['prop'] : {}
+            );
             popper.show();
-            poppers[id] = new Popper(opts['self'] ? this : $(opts.elm),popper);
             if (opts.hasOwnProperty('in') && typeof opts['in'] === 'function'){
                 opts['in']({ this: this, popper: popper });
             }
@@ -214,7 +211,7 @@ window.importGame = function importGame(data,utf16){
         if (webWorker.w){
             webWorker.w.terminate();
         }
-        if (saveState.hasOwnProperty('tech')){
+        if (saveState.hasOwnProperty('tech') && utf16){
             if (saveState.tech.hasOwnProperty('whitehole') && saveState.tech.whitehole >= 4){
                 saveState.tech.whitehole = 3;
                 saveState.resource.Soul_Gem.amount += 10;
@@ -227,9 +224,68 @@ window.importGame = function importGame(data,utf16){
                 saveState.stats.know -= 500000;
             }
         }
-        save.setItem('evolved',LZString.compressToUTF16(JSON.stringify(saveState)));        
+        save.setItem('evolved',LZString.compressToUTF16(JSON.stringify(saveState)));
         window.location.reload();
     }
+}
+
+export function powerGrid(type,reset){
+    let grids = gridDefs();
+
+    let power_structs = [];
+    switch (type){
+        case 'power':
+            power_structs = [
+                'prtl_ruins:arcology','city:apartment','int_alpha:habitat','int_alpha:luxury_condo','spc_red:spaceport','int_alpha:starport','int_blackhole:s_gate','gxy_gateway:starbase',
+                'gxy_gateway:ship_dock','prtl_ruins:hell_forge','int_neutron:stellar_forge','int_neutron:citadel','city:coal_mine','spc_moon:moon_base','spc_red:red_tower','spc_home:nav_beacon',
+                'int_proxima:xfer_station','gxy_stargate:telemetry_beacon','int_nebula:nexus','gxy_stargate:gateway_depot','spc_dwarf:elerium_contain','spc_gas:gas_mining','spc_belt:space_station',
+                'spc_gas_moon:outpost','gxy_gorddon:embassy','gxy_gorddon:dormitory','gxy_alien1:resort','spc_gas_moon:oil_extractor','int_alpha:int_factory','city:factory','spc_red:red_factory',
+                'spc_dwarf:world_controller','prtl_fortress:turret','prtl_badlands:war_drone','city:wardenclyffe','city:biolab','city:mine','city:rock_quarry','city:cement_plant','city:sawmill',
+                'city:mass_driver','int_neutron:neutron_miner','prtl_fortress:war_droid','prtl_pit:soul_forge','gxy_chthonian:excavator','int_blackhole:far_reach','prtl_badlands:sensor_drone',
+                'prtl_badlands:attractor','city:metal_refinery','gxy_stargate:gateway_station','gxy_alien1:vitreloy_plant','gxy_alien2:foothold','gxy_gorddon:symposium',
+                'int_blackhole:mass_ejector','city:casino','spc_hell:spc_casino','prtl_fortress:repair_droid','gxy_stargate:defense_platform','prtl_ruins:guard_post',
+                'prtl_lake:cooling_tower','prtl_lake:harbour','prtl_spire:purifier','prtl_ruins:archaeology','prtl_pit:gun_emplacement','prtl_gate:gate_turret','prtl_pit:soul_attractor',
+                'prtl_gate:infernite_mine','int_sirius:ascension_trigger'
+            ];
+            break;
+        case 'moon':
+            power_structs = ['spc_moon:helium_mine','spc_moon:iridium_mine','spc_moon:observatory'];
+            break;
+        case 'red':
+            power_structs = ['spc_red:living_quarters','spc_red:exotic_lab','spc_red:red_mine','spc_red:fabrication','spc_red:biodome','spc_red:vr_center'];
+            break;
+        case 'belt':
+            power_structs = ['spc_belt:elerium_ship','spc_belt:iridium_ship','spc_belt:iron_ship'];
+            break;
+        case 'alpha':
+            power_structs = ['int_alpha:fusion','int_alpha:mining_droid','int_alpha:processing','int_alpha:laboratory','int_alpha:g_factory','int_alpha:exchange','int_alpha:zoo'];
+            break;
+        case 'nebula':
+            power_structs = ['int_nebula:harvester','int_nebula:elerium_prospector'];
+            break;
+        case 'gateway':
+            power_structs = ['gxy_gateway:bolognium_ship','gxy_gateway:dreadnought','gxy_gateway:cruiser_ship','gxy_gateway:frigate_ship','gxy_gateway:corvette_ship','gxy_gateway:scout_ship'];
+            break;
+        case 'alien2':
+            power_structs = ['gxy_alien2:armed_miner','gxy_alien2:ore_processor','gxy_alien2:scavenger'];
+            break;
+        case 'lake':
+            power_structs = ['prtl_lake:bireme','prtl_lake:transport'];
+            break;
+        case 'spire':
+            power_structs = ['prtl_spire:port','prtl_spire:base_camp','prtl_spire:mechbay'];
+            break;
+    }
+
+    if (reset){
+        grids[type].l.length = 0;
+    }
+
+    power_structs.forEach(function(struct){
+        if (!grids[type].l.includes(struct)){
+            grids[type].l.push(struct);
+        }
+    });
 }
 
 export function messageQueue(msg,color){
@@ -259,13 +315,14 @@ export function removeFromRQueue(tech_trees){
 }
 
 export function buildQueue(){
+    clearDragQueue();
     clearElement($('#buildQueue'));
-    $('#buildQueue').append($('<h2 class="has-text-success is-sr-only">Building Queue</h2>'));
+    $('#buildQueue').append($(`<h2 class="has-text-success is-sr-only">${loc('building_queue')}</h2>`));
 
     let queue = $(`<ul class="buildList"></ul>`);
     $('#buildQueue').append(queue);
 
-    queue.append($(`<li v-for="(item, index) in queue"><a v-bind:id="setID(index)" class="queued" v-bind:class="{ 'qany': item.qa }" @click="remove(index)"><span class="has-text-warning">{{ item.label }}{{ item.q | count }}</span> [<span v-bind:class="{ 'has-text-danger': item.cna, 'has-text-success': !item.cna }">{{ item.time | time }}{{ item.t_max | max_t(item.time) }}</span>]</a></li>`));
+    queue.append($(`<li v-for="(item, index) in queue"><a v-bind:id="setID(index)" class="has-text-warning queued" v-bind:class="{ 'qany': item.qa }" @click="remove(index)"><span v-bind:class="setData(index,'res')" v-bind="setData(index,'data')">{{ item.label }}{{ item.q | count }}</span> [<span v-bind:class="{ 'has-text-danger': item.cna, 'has-text-success': !item.cna }">{{ item.time | time }}{{ item.t_max | max_t(item.time) }}</span>]</a></li>`));
 
     try {
         vBind({
@@ -281,10 +338,41 @@ export function buildQueue(){
                     }
                     else {
                         global.queue.queue.splice(index,1);
+                        buildQueue();
                     }
                 },
                 setID(index){
                     return `q${global.queue.queue[index].id}${index}`;
+                },
+                setData(index,prefix){
+                    let c_action;
+                    let segments = global.queue.queue[index].id.split("-");
+                    if (segments[0].substring(0,4) === 'arpa'){
+                        c_action = segments[0].substring(4);
+                    }
+                    else if (segments[0] === 'city' || segments[0] === 'starDock'){
+                        c_action = actions[segments[0]][segments[1]];
+                    }
+                    else {
+                        Object.keys(actions[segments[0]]).forEach(function (region){
+                            if (actions[segments[0]][region].hasOwnProperty(segments[1])){
+                                c_action = actions[segments[0]][region][segments[1]];
+                            }
+                        });
+                    }
+
+                    let final_costs = {};
+                    if (c_action['cost']){
+                        let costs = adjustCosts(c_action.cost);
+                        Object.keys(costs).forEach(function (res){
+                            let cost = costs[res]();
+                            if (cost > 0){
+                                final_costs[`${prefix}-${res}`] = cost;
+                            }
+                        });
+                    }
+
+                    return final_costs;
                 }
             },
             filters: {
@@ -306,7 +394,17 @@ export function buildQueue(){
     }
 }
 
-export function dragQueue(){
+function clearDragQueue(){
+    let el = $('#buildQueue .buildList')[0];
+    if (el){
+        let sort = Sortable.get(el);
+        if (sort){
+            sort.destroy();
+        }
+    }
+}
+
+function dragQueue(){
     let el = $('#buildQueue .buildList')[0];
     Sortable.create(el,{
         onEnd(e){
@@ -377,19 +475,26 @@ export function cleanBuildPopOver(id){
     clearElement($(`#pop${id}`),true);
 }
 
-export function modRes(res,val){
+export function modRes(res,val,notrack,buffer){
     let count = global.resource[res].amount + val;
     let success = true;
     if (count > global.resource[res].max && global.resource[res].max != -1){
         count = global.resource[res].max;
     }
     else if (count < 0){
+        if (!buffer || (buffer && (count * -1) > buffer)){
+            success = false;
+        }
         count = 0;
-        success = false;
     }
     if (!Number.isNaN(count)){
         global.resource[res].amount = count;
-        global.resource[res].delta += val;
+        if (!notrack){
+            global.resource[res].delta += val;
+            if (res === 'Mana' && val > 0){
+                global.resource[res].gen_d += val;
+            }
+        }
     }
     return success;
 }
@@ -523,7 +628,7 @@ export function spaceCostMultiplier(action,offset,base,mutiplier,sector){
         mutiplier = 1.005;
     }
     var count = global[sector][action] ? global[sector][action].count : 0;
-    if (offset){
+    if (offset && typeof offset === 'number'){
         count += offset;
     }
     return Math.round((mutiplier ** count) * base);
@@ -553,6 +658,11 @@ export function harmonyEffect(){
                     boost = global.stats.achieve.ascended.m * global.race.Harmony.count;
                 }
                 break;
+            case 'magic':
+                if (global.stats.achieve.ascended.hasOwnProperty('mg')){
+                    boost = global.stats.achieve.ascended.mg * global.race.Harmony.count;
+                }
+                break;
             default:
                 if (global.stats.achieve.ascended.hasOwnProperty('l')){
                     boost = global.stats.achieve.ascended.l * global.race.Harmony.count;
@@ -573,12 +683,15 @@ export function timeCheck(c_action,track,detailed){
         let bottleneck = false;
         let costs = adjustCosts(c_action.cost);
         Object.keys(costs).forEach(function (res){
-            if (res !== 'Morale' && res !== 'HellArmy' && res !== 'Structs' && res !== 'Bool' && res !== 'Plasmid' && res !== 'Phage' && res !== 'AntiPlasmid'){
+            if (!['Morale','HellArmy','Structs','Bool','Plasmid','AntiPlasmid','Phage','Dark','Harmony'].includes(res)){
                 var testCost = track && track.id[c_action.id] ? Number(costs[res](track.id[c_action.id])) : Number(costs[res]());
                 if (testCost > 0){
-                    let res_have = Number(global.resource[res].amount);
+                    let res_have = res === 'Supply' ? global.portal.purifier.supply : Number(global.resource[res].amount);
+                    let res_max = res === 'Supply' ? global.portal.purifier.sup_max : global.resource[res].max;
+                    let res_diff = res === 'Supply' ? global.portal.purifier.diff : global.resource[res].diff;
+
                     if (track){
-                        res_have += global.resource[res].diff * track.t;
+                        res_have += res_diff * track.t;
                         if (track.r[res]){
                             res_have -= Number(track.r[res]);
                             track.r[res] += testCost;
@@ -586,13 +699,13 @@ export function timeCheck(c_action,track,detailed){
                         else {
                             track.r[res] = testCost;
                         }
-                        if (global.resource[res].max >= 0 && res_have > global.resource[res].max){
-                            res_have = global.resource[res].max;
+                        if (res_max >= 0 && res_have > res_max){
+                            res_have = res_max;
                         }
                     }
                     if (testCost > res_have){
-                        if (global.resource[res].diff > 0){
-                            let r_time = (testCost - res_have) / global.resource[res].diff;
+                        if (res_diff > 0){
+                            let r_time = (testCost - res_have) / res_diff;
                             if (r_time > time){
                                 bottleneck = res;
                                 time = r_time;
@@ -679,6 +792,10 @@ export function clearElement(elm,remove){
         catch(e){}
     });
     if (remove){
+        try {
+            elm[0].__vue__.$destroy();
+        }
+        catch(e){}
         elm.remove();
     }
     else {
@@ -821,34 +938,72 @@ export function darkEffect(universe, flag, info){
                 return 1 + (Math.log(50 + de) - 3.912023005428146) / 5;
             }
             return 0;
+
+        case 'magic':
+            if (global.race.universe === 'magic' || info){
+                let de = global.race.Dark.count;
+                if (global.race.Harmony.count > 0){
+                    de *= 1 + (global.race.Harmony.count * 0.01);
+                }
+                return 1 + (Math.log(50 + de) - 3.912023005428146) / 3;
+            }
+            return 0;
     }
 
     return 0;
 }
 
-export function calc_mastery(){
-    if (global.genes['challenge'] && global.genes['challenge'] >= 2){
-        let m_rate = global.race.universe === 'standard' ? 0.25 : 0.15;
-        let u_rate = global.genes['challenge'] >= 3 ? 0.15 : 0.1;
-        if (global.genes['challenge'] >= 4 && global.race.universe !== 'standard'){
-            m_rate += 0.05;
-            u_rate -= 0.05;
+export const calc_mastery = (function(){
+    var mastery;
+    return function(recalc){
+        if (mastery && !recalc){
+            return mastery;
         }
-        if (global.race['weak_mastery']){
-            m_rate /= 10;
-            u_rate /= 10;
+        else if (global.genes['challenge'] && global.genes['challenge'] >= 2){
+            let m_rate = global.race.universe === 'standard' ? 0.25 : 0.15;
+            let u_rate = global.genes['challenge'] >= 3 ? 0.15 : 0.1;
+            if (global.genes['challenge'] >= 4 && global.race.universe !== 'standard'){
+                m_rate += 0.05;
+                u_rate -= 0.05;
+            }
+            if (global.race['weak_mastery']){
+                m_rate /= 10;
+                u_rate /= 10;
+            }
+            mastery = achieve_level * m_rate;
+            if (global.race.universe !== 'standard'){
+                mastery += universe_level * u_rate;
+            }
+            if (global.genes['challenge'] && global.genes['challenge'] >= 5 && global.race.hasOwnProperty('mastery')){
+                mastery *= 1 + (0.01 * global.race.mastery);
+            }
+            return mastery;
         }
-        let mastery = achieve_level * m_rate;
-        if (global.race.universe !== 'standard'){
-            mastery += universe_level * u_rate;
-        }
-        if (global.genes['challenge'] && global.genes['challenge'] >= 5 && global.race.hasOwnProperty('mastery')){
-            mastery *= 1 + (0.01 * global.race.mastery);
-        }
-        return mastery;
+        return 0;
     }
-    return 0;
-}
+})();
+
+export const calcPillar = (function(){
+    var bonus;
+    return function(recalc){
+        if (!bonus || recalc){
+            let active = 0;
+            Object.keys(global.pillars).forEach(function(race){
+                if (races[race] && global.race.species === race){
+                    active += 4;
+                }
+                else if (races[race]){
+                    active++;
+                }
+            });
+            bonus = [
+                1 + (active / 100), // Production
+                1 + (active * 2 / 100) // Storage
+            ];
+        }
+        return bonus;
+    }
+})();
 
 function challenge_multiplier(value,type,decimals){
     decimals = decimals || 0;
@@ -928,6 +1083,7 @@ export function calcPrestige(type){
             k_mult = 1.015;
             phage_mult = 1;
             break;
+        case 'vacuum':
         case 'bigbang':
             pop_divisor = 2.2;
             k_inc = 40000;
@@ -964,6 +1120,11 @@ export function calcPrestige(type){
         new_dark = challenge_multiplier(new_dark,'bigbang',3);
         gains.dark = new_dark;
     }
+    else if (type === 'vacuum'){
+        let new_dark = +(Math.log2(global.resource.Mana.gen)/5).toFixed(3);
+        new_dark = challenge_multiplier(new_dark,'vacuum',3);
+        gains.dark = new_dark;
+    }
 
     if (type === 'ascend'){
         let harmony = 1;
@@ -994,7 +1155,7 @@ export function calcPrestige(type){
     return gains;
 }
 
-export function adjustCosts(costs){
+export function adjustCosts(costs, wiki){
     if ((costs['RNA'] || costs['DNA']) && global.genes['evolve']){
         var newCosts = {};
         Object.keys(costs).forEach(function (res){
@@ -1004,25 +1165,26 @@ export function adjustCosts(costs){
         });
         return newCosts;
     }
-    costs = technoAdjust(costs);
-    costs = kindlingAdjust(costs);
+    costs = technoAdjust(costs, wiki);
+    costs = kindlingAdjust(costs, wiki);
     costs = scienceAdjust(costs);
-    costs = rebarAdjust(costs);
-    return craftAdjust(costs);
+    costs = rebarAdjust(costs, wiki);
+    return craftAdjust(costs, wiki);
 }
 
-function technoAdjust(costs){
+function technoAdjust(costs, wiki){
     if (global.civic.govern.type === 'technocracy'){
+        let adjust = global.tech['high_tech'] && global.tech['high_tech'] >= 12 ? ( global.tech['high_tech'] >= 16 ? 1 : 1.01 ) : 1.02;
         var newCosts = {};
         Object.keys(costs).forEach(function (res){
             if (res === 'Knowledge'){
-                newCosts[res] = function(){ return Math.round(costs[res]() * 0.92); }
+                newCosts[res] = function(){ return Math.round(costs[res](wiki) * 0.92); }
             }
-            else if (res === 'Money' || res === 'Structs'){
-                newCosts[res] = function(){ return costs[res](); }
+            else if (res === 'Money' || res === 'Structs' || res === 'Custom'){
+                newCosts[res] = function(){ return costs[res](wiki); }
             }
             else {
-                newCosts[res] = function(){ return Math.round(costs[res]() * 1.02); }
+                newCosts[res] = function(){ return Math.round(costs[res](wiki) * adjust); }
             }
         });
         return newCosts;
@@ -1055,16 +1217,16 @@ function scienceAdjust(costs){
     return costs;
 }
 
-function kindlingAdjust(costs){
+function kindlingAdjust(costs, wiki){
     if (global.race['kindling_kindred'] && (costs['Lumber'] || costs['Plywood'])){
         var newCosts = {};
         let adjustRate = 1 + (traits.kindling_kindred.vars[0] / 100);
         Object.keys(costs).forEach(function (res){
             if (res !== 'Lumber' && res !== 'Plywood' && res !== 'Structs'){
-                newCosts[res] = function(){ return Math.round(costs[res]() * adjustRate) || 0; }
+                newCosts[res] = function(){ return Math.round(costs[res](wiki) * adjustRate) || 0; }
             }
             else if (res === 'Structs'){
-                newCosts[res] = function(){ return costs[res](); }
+                newCosts[res] = function(){ return costs[res](wiki); }
             }
         });
         return newCosts;
@@ -1072,15 +1234,15 @@ function kindlingAdjust(costs){
     return costs;
 }
 
-function craftAdjust(costs){
-    if (global.race['hollow_bones'] && (costs['Plywood'] || costs['Brick'] || costs['Wrought_Iron'] || costs['Sheet_Metal'] || costs['Mythril'] || costs['Aerogel'])){
+function craftAdjust(costs, wiki){
+    if (global.race['hollow_bones'] && (costs['Plywood'] || costs['Brick'] || costs['Wrought_Iron'] || costs['Sheet_Metal'] || costs['Mythril'] || costs['Aerogel'] || costs['Nanoweave'] || costs['Scarletite'])){
         var newCosts = {};
         Object.keys(costs).forEach(function (res){
-            if (res === 'Plywood' || res === 'Brick' || res === 'Wrought_Iron' || res === 'Sheet_Metal' || res === 'Mythril' || res === 'Aerogel'){
-                newCosts[res] = function(){ return Math.round(costs[res]() * (1 - (traits.hollow_bones.vars[0] / 100))); }
+            if (res === 'Plywood' || res === 'Brick' || res === 'Wrought_Iron' || res === 'Sheet_Metal' || res === 'Mythril' || res === 'Aerogel' || res === 'Nanoweave' || res === 'Scarletite'){
+                newCosts[res] = function(){ return Math.round(costs[res](wiki) * (1 - (traits.hollow_bones.vars[0] / 100))); }
             }
             else {
-                newCosts[res] = function(){ return Math.round(costs[res]()); }
+                newCosts[res] = function(){ return Math.round(costs[res](wiki)); }
             }
         });
         return newCosts;
@@ -1088,16 +1250,16 @@ function craftAdjust(costs){
     return costs;
 }
 
-function rebarAdjust(costs){
+function rebarAdjust(costs, wiki){
     if (costs['Cement'] && global.tech['cement'] && global.tech['cement'] >= 2){
         let discount = global.tech['cement'] >= 3 ? 0.8 : 0.9;
         var newCosts = {};
         Object.keys(costs).forEach(function (res){
             if (res === 'Cement'){
-                newCosts[res] = function(){ return Math.round(costs[res]() * discount) || 0; }
+                newCosts[res] = function(){ return Math.round(costs[res](wiki) * discount) || 0; }
             }
             else {
-                newCosts[res] = function(){ return Math.round(costs[res]()); }
+                newCosts[res] = function(){ return Math.round(costs[res](wiki)); }
             }
         });
         return newCosts;
@@ -1117,12 +1279,14 @@ export function svgIcons(icon){
             return `<path class="penta" d="m105.63 236.87c-17.275-2.22-34.678-8.73-49.291-18.44-54.583-36.26-69.355-108.23-33.382-162.64 11.964-18.101 31.389-34.423 51.05-42.899 36.303-15.652 78.013-12.004 110.65 9.678 54.58 36.259 69.36 108.23 33.38 162.65-24.44 36.97-68.62 57.27-112.41 51.65zm9.37-7.17c0-1.12-15.871-50.86-20.804-65.2l-1.719-5-36.926-0.26c-20.309-0.15-37.284 0.09-37.721 0.53-1.104 1.1 4.147 11.87 10.535 21.59 16.439 25.04 41.149 41.59 71.135 47.65 11.07 2.24 15.5 2.44 15.5 0.69zm25.71-0.61c30.52-5.95 55.28-22.38 71.92-47.73 6.39-9.72 11.64-20.49 10.54-21.59-0.44-0.44-17.41-0.68-37.72-0.53l-36.93 0.26-1.72 5c-4.93 14.34-20.8 64.08-20.8 65.2 0 1.77 3.2 1.64 14.71-0.61zm-9.32-38.99c5.25-16.18 9.3-29.79 9.01-30.25-0.28-0.47-9.24-0.85-19.9-0.85s-19.62 0.38-19.9 0.85c-0.46 0.74 17.66 58.14 19.08 60.43 0.3 0.49 0.91 0.52 1.36 0.06s5.11-14.07 10.35-30.24zm-42.19-38.63c0.629-0.63-10.723-36.39-11.936-37.61-0.817-0.81-51.452 35.32-52.097 37.18-0.349 1 63.032 1.43 64.033 0.43zm61.27-20.06c3.65-11.32 6.51-21.41 6.34-22.42-0.32-1.86-34.12-26.99-36.31-26.99s-35.993 25.13-36.308 26.99c-0.169 1.01 2.683 11.1 6.339 22.42l6.647 20.59h46.642l6.65-20.59zm65.36 19.63c-0.64-1.86-51.28-37.99-52.09-37.18-1.22 1.22-12.57 36.98-11.94 37.61 1 1 64.38 0.57 64.03-0.43zm-169.97-24.02c16.09-11.7 29.071-21.78 28.847-22.4-0.397-1.09-12.185-37.499-18.958-58.555-1.846-5.739-3.951-10.632-4.678-10.875-0.727-0.242-4.903 3.259-9.28 7.78-22 22.72-32.81 50.641-31.513 81.39 0.678 16.09 2.371 24.97 4.646 24.37 0.925-0.24 14.846-10.01 30.936-21.71zm183.14 15.73c0.66-3.44 1.44-11.71 1.72-18.39 1.3-30.749-9.51-58.67-31.51-81.39-4.38-4.521-8.55-8.022-9.28-7.78-0.73 0.243-2.83 5.136-4.68 10.875-1.84 5.739-6.93 21.448-11.29 34.908-6.26 19.297-7.68 24.717-6.7 25.627 3.41 3.18 58.29 42.4 59.32 42.4 0.68 0 1.73-2.72 2.42-6.25zm-129.27-54.808c7.573-5.522 13.773-10.467 13.773-10.987 0-1.007-50.318-37.955-51.689-37.955-0.446 0-0.811 0.317-0.811 0.704 0 0.388 3.825 12.484 8.5 26.882s8.5 26.401 8.5 26.674 0.697 2.163 1.548 4.201c1.832 4.389-0.216 5.349 20.179-9.519zm66.613-5.442c3.03-9.35 7.35-22.629 9.59-29.508 4.36-13.403 4.5-13.992 3.26-13.992-1.39 0-51.69 36.953-51.69 37.971 0 1.477 31.75 24.189 32.58 23.309 0.4-0.431 3.22-8.43 6.26-17.78zm-14.4-32.538l29.32-21.329-2.37-1.927c-10.93-8.844-38.4-16.706-58.39-16.706s-47.464 7.862-58.388 16.708l-2.382 1.929 29.885 21.728c16.845 12.25 30.565 21.552 31.435 21.326 0.86-0.22 14.75-9.999 30.89-21.729z"/>`;
         case 'micro':
             return `<path class="micro" d="m150.18 114.71c-11.276-6.0279-15.771-19.766-9.9989-30.563 6.0279-11.276 19.766-15.771 30.563-9.9989 11.276 6.0279 15.771 19.766 9.9989 30.563-6.0279 11.276-19.766 15.771-30.563 9.9989z"/><path d="m47.263 265.24c-0.41891-0.4189-0.76165-5.194-0.76165-10.611 0-11.606 2.7184-18.417 9.0231-22.606 3.8412-2.5527 4.2946-2.5798 43.128-2.5798h39.246v-13.71-13.71h10.905c10.055 0 11.124-0.2186 13.71-2.8043 2.5824-2.5824 2.8043-3.66 2.8043-13.619v-10.815l3.3639-0.73883c1.8501-0.40636 5.1713-2.7395 7.3804-5.1847 8.0637-8.9255 9.8103-25.642 3.9223-37.54l-2.9588-5.9787 5.9675-5.9676c9.887-9.887 12.537-24.129 6.6886-35.949-1.3037-2.635-2.1165-4.7908-1.8062-4.7908 0.31024 0 3.5239 1.798 7.1414 3.9955 14.491 8.8026 26.675 25.759 31.636 44.025 2.7168 10.004 2.7314 30.947 0.0286 41.093-4.445 16.685-15.856 33.364-29.027 42.425l-4.9176 3.3834v7.9424 7.9424h10.966c12.713 0 17.226 1.5998 21.944 7.7794 2.828 3.7038 3.1086 5.033 3.464 16.405l0.4 12.38h-90.737c-49.906 0-91.08-0.34274-91.499-0.76165zm17.518-81.497v-9.1398h45.699 45.699v9.1398 9.1398h-45.699-45.699v-9.1398zm32.227-32.318-4.8078-4.8988v-13.72-13.72l-4.5699-4.4624-4.5699-4.4624v-27.527-27.527l4.5699-4.4624c4.5593-4.452 4.5699-4.4831 4.5699-13.37 0-8.6703-0.07402-8.9079-2.7746-8.9079-4.4514 0-6.3652-2.8757-6.3652-9.5641 0-3.2854 0.61694-6.5904 1.371-7.3445 1.9422-1.9422 50.155-1.9422 52.097 0 0.75403 0.75403 1.371 4.3347 1.371 7.9571 0 6.9911-1.4848 8.9515-6.7797 8.9515-2.1833 0-2.3601 0.66715-2.3601 8.9079 0 8.8872 0.0103 8.9183 4.5699 13.37l4.5699 4.4624v9.5554c0 8.412-0.33908 10-2.8338 13.271-6.443 8.4472-7.9966 20.22-4.0419 30.628 2.2572 5.9405 2.2572 5.9661 0 8.3688-1.997 2.1258-2.2642 4.0244-2.2642 16.094v13.684l-4.8988 4.8078c-4.877 4.7864-4.9369 4.8078-13.472 4.8078h-8.5731l-4.8078-4.8988z"/>`;
+        case 'magic':
+            return `<path class="magic" d="m 2077.0957,2355.0556 c -24.8548,-6.6306 -43.8442,-12.4931 -65.1438,-20.1115 -171.2303,-61.2458 -332.546,-186.5828 -484.656,-376.562 -106.9479,-133.5736 -211.9033,-304.0752 -307.5304,-499.5874 -70.9505,-145.0603 -137.2376,-301.6744 -201.0755,-475.07329 -4.0445,-10.9859 -7.4891,-20.1129 -7.6546,-20.2824 -0.1656,-0.1694 -2.0374,1.7618 -4.1597,4.2917 -41.97221,50.03289 -102.85691,112.12769 -165.25321,168.53769 -153.4012,138.6841 -322.8342,254.6704 -451.2868,308.9308 -4.8375,2.0435 -9.6944,4.102 -10.793,4.5744 l -1.9977,0.8591 14.4133,7.0194 c 72.3515,35.2357 143.3639,78.5554 206.1228,125.7414 218.7562,164.4739 368.1707,393.9487 437.81411,672.4065 3.7109,14.8375 9.1943,38.7303 9.0117,39.2665 -0.069,0.2024 -1.3235,-3.0502 -2.788,-7.228 -74.09121,-211.3582 -207.71511,-385.1177 -394.71211,-513.2685 -102.107,-69.9749 -219.4845,-126.1019 -348.488,-166.6383 -76.1077,-23.9151 -155.9429,-42.2005 -232.883496,-53.3396 -6.991,-1.0121 -12.8528,-1.8883 -13.0261,-1.947 -0.1733,-0.059 2.0738,-1.6288 4.9936,-3.4891 2.9198,-1.8603 15.625,-10.0516 28.2339,-18.2031 204.092496,-131.9427 358.291896,-247.07 478.472596,-357.2338 37.0992,-34.0071 77.0506,-73.8638 107.6314,-107.3762 86.2451,-94.51319 148.9362,-188.57859 189.3356,-284.08999 30.7863,-72.7845 49.1302,-147.8337 55.0585,-225.2576 0.8677,-11.3324 1.6179,-24.3907 1.6179,-28.1635 l 0,-2.8677 -2.3833,-0.2589 c -5.6397,-0.6126 -53.3922,-2.328 -84.3238,-3.0291 -26.1322,-0.5923 -105.9829,-0.2965 -125.748,0.4658 -35.3648,1.3639 -61.1426,2.7941 -86.7072,4.8105 -195.6367,15.431 -343.0035,61.1297 -446.9275,138.593 -2.4968,1.8611 -4.029,2.8664 -3.4048,2.2341 0.9758,-0.9885 397.2225,-336.9788 399.0477,-338.3654 0.4983,-0.3785 8.2687,0.05 30.6293,1.691 273.5285,20.0676 411.83311,27.9616 556.33281,31.7538 29.6737,0.7788 110.952,1.0595 138.2321,0.4775 83.5286,-1.7821 143.7695,-6.6707 194.0695,-15.7487 47.0041,-8.4831 83.1621,-21.2812 103.3974,-36.5973 1.6154,-1.2226 2.9812,-2.1619 3.0353,-2.0872 0.054,0.075 -0.079,2.1785 -0.2952,4.6753 -0.578,6.6693 -0.5481,29.498 0.048,36.3171 3.3368,38.2002 14.0507,70.8483 33.8884,103.2667 18.8519,30.8073 47.6861,61.0826 82.1419,86.2473 37.3245,27.2597 81.564,49.9843 131.8765,67.7412 4.8688,1.7184 8.2555,3.0024 7.5259,2.8535 -0.7295,-0.1489 -6.3473,-1.3924 -12.484,-2.7634 -39.6642,-8.861 -104.6887,-20.5993 -168.0021,-30.328 -137.3768,-21.1093 -273.1583,-35.4146 -362.8049,-38.2235 l -9.8479,-0.3086 -0.224,1.0898 c -0.1233,0.5995 -0.335,2.5199 -0.4706,4.2677 -1.3397,17.2691 -1.7023,22.4205 -2.2846,32.4584 -2.3935,41.2643 -2.3955,89.1364 -0.01,134.8273 11.3803,217.5701 77.3475,473.27869 189.8401,735.87559 89.2575,208.3584 210.5193,422.3508 332.3606,586.5215 22.7139,30.605 33.0709,42.8702 44.5166,52.7187 25.6187,22.0437 46.811,23.8716 65.2335,5.6265 19.5207,-19.3327 34.7161,-60.9422 45.5423,-124.7077 19.3386,-113.9042 23.2932,-297.6572 10.9059,-506.7671 -4.6678,-78.7985 -10.1013,-140.5522 -20.8699,-237.1961 -5.9357,-53.2693 -7.4546,-65.7004 -8.6502,-70.7914 -4.7369,-20.171 -27.3114,-47.5028 -65.7926,-79.6576 -11.906,-9.9486 -20.1748,-16.4224 -39.1544,-30.6551 -8.4267,-6.3191 -15.3189,-11.6171 -15.3159,-11.7734 0,-0.1563 1.2797,-0.9816 2.8373,-1.8339 14.6036,-7.9917 42.9197,-26.1494 64.2088,-41.17369 35.0761,-24.7546 77.4208,-59.2093 108.4143,-88.2139 58.9609,-55.1774 106.4613,-109.4316 139.8321,-159.7139 2.693,-4.0578 4.9524,-7.3218 5.0209,-7.2532 0.069,0.068 -0.9793,4.6953 -2.3284,10.2819 -52.0714,215.624 -73.4586,458.30359 -63.0753,715.71049 8.1008,200.8217 36.667,415.9599 82.2909,619.7502 l 2.6625,11.8924 -4.124,2.8336 c -25.7438,17.6888 -44.4201,32.0283 -57.3292,44.017 -19.4405,18.0544 -30.6873,35.3946 -36.0405,55.5665 -3.2336,12.1849 -4.2393,21.7435 -4.2035,39.9489 0.043,21.9591 1.571,38.7035 9.4024,103.0498 1.3371,10.9859 2.4091,19.9949 2.3823,20.0199 -0.027,0.025 -1.8874,-0.445 -4.1345,-1.0444 z m 326.7144,-985.6489 c -17.4427,-32.7693 -52.6734,-76.4714 -96.8446,-120.1314 -30.3662,-30.0148 -57.7931,-52.8046 -81.5396,-67.7535 -6.8082,-4.2859 -19.6404,-11.0063 -22.8544,-11.9693 -0.9739,-0.2918 -1.7706,-0.6524 -1.7706,-0.8014 0,-0.149 1.2767,-0.754 2.8373,-1.3444 8.1023,-3.0654 22.7254,-11.5869 35.2957,-20.5684 21.4993,-15.3612 43.2465,-34.1516 68.6986,-59.358 42.609,-42.1976 76.3979,-83.8447 94.6619,-116.67699 2.2626,-4.0672 4.2245,-7.6252 4.36,-7.9065 0.1826,-0.3795 0.3097,-0.3795 0.4923,0 0.1354,0.2813 2.0845,3.8162 4.3314,7.8552 18.2956,32.88899 52.1844,74.66389 94.6871,116.72119 25.6446,25.3759 47.2008,44.0026 68.702,59.3651 12.5703,8.9815 27.1934,17.503 35.2957,20.5684 1.5605,0.5904 2.8373,1.1777 2.8373,1.3051 0,0.1274 -1.2768,0.7145 -2.8373,1.305 -1.5605,0.5904 -5.6973,2.5407 -9.1928,4.334 -24.7032,12.6736 -57.8306,39.0407 -94.1346,74.9245 -44.1711,43.66 -79.4018,87.3621 -96.8445,120.1314 -1.5749,2.9588 -2.9656,5.3796 -3.0904,5.3796 -0.1249,0 -1.5156,-2.4208 -3.0905,-5.3796 z M 166.36129,670.71331 c 0.452,-0.4994 0.9239,-0.9079 1.0487,-0.9079 0.1248,0 -0.1428,0.4085 -0.5947,0.9079 -0.4519,0.4993 -0.9238,0.9079 -1.0487,0.9079 -0.1248,0 0.1428,-0.4086 0.5947,-0.9079 z"/>`;
         case 'heart':
             return `<g transform="translate(-607.63544,-698.58531)"><path class="star" stroke-linejoin="bevel" d="m617.13,701.11c-1.4819-1.5161-3.8406-2.4136-5.9091-1.5906-3.1802,1.2712-3.8517,4.1218-2.2123,6.797,1.8712,2.8746,4.5334,5.1378,7.2328,7.2307,0.50882,0.48806,1.0416,0.83797,1.5551,0.16685,2.744-2.1002,5.4398-4.3792,7.3689-7.2612,1.8138-3.0332,1.0747-5.4453-1.935-6.8574-2.1226-0.94739-4.5563-0.0556-6.1004,1.5147z" stroke="#333" stroke-linecap="square" stroke-miterlimit="4" stroke-dasharray="none" stroke-width="1"/></g>`;
         case 'clover':
             return `<g transform="translate(-126.4 -67.282)"><path style="stroke:#000000;stroke-width:.25pt" d="m452.02 434.8c-34.94 243.11-14.78 319.53 160.84 411.18 15.36 3.36 40.79 0.96 33.11-20.15-199.14-114.69-188.7-141.27-175.23-393.91-43.63 768.78 702.86-132.4 10.47-30.23 711.79-66.28-46.43-703.13-22.24-23.18 11.94-684.77-733.52 34.13-25.81 24.02-675.4-13.74-31.72 748.27 18.86 32.27z"/><path style="fill-rule:evenodd;fill:url(#radialGradient2313)" d="m445.85 337.53c-16.28-66.5-8.14-216.47-116.04-242.26-151.33-4.074-200.87 130.29-185.26 195.44 38 96.36 177.79 86.86 278.91 93.65"/><path style="fill-rule:evenodd;fill:url(#radialGradient2317)" d="m464.84 325.36c18.32-95 22.39-222.58 130.29-248.37 151.34-4.072 204.95 126.22 179.16 191.37-54.29 96.36-173.73 111.29-274.84 118.08"/><path style="fill-rule:evenodd;fill:url(#radialGradient2319)" d="m443.15 455.24c-15.85 66.04-26.25 249.56-131.26 275.17-124.88 30.51-195.49-129.38-180.3-194.07 36.99-95.68 199.51-120.86 297.91-127.6"/><path style="fill-rule:evenodd;fill:url(#radialGradient2321)" d="m477.05 465.75c16.29 66.5-12.21 244.98 95.69 270.77 151.33 4.07 211.05-181.19 195.44-246.34-38-96.37-163.55-84.83-262.62-81.44"/></g>`;
-        //case 'candy':
-        //    return `<g transform="translate(-66.38 -391.32)"><path style="stroke-linejoin:round;fill-rule:evenodd;stroke:#000000;stroke-width:5.1638" d="m157.3 429.82c10.05 10.99 5.39 31.63-10.4 46.06s-36.76 17.22-46.8 6.23c-10.051-10.99-5.391-31.63 10.4-46.06 15.72-14.37 36.57-17.21 46.68-6.36l0.12 0.13z"/><path style="fill-rule:evenodd;fill:#ff0000" d="m100.63 448.65c15.97 5.86 28.88 16.17 34.76 36.69l20.79-21.5c-4.54-18.43-16.11-30.05-34.65-34.88l-20.9 19.69z"/><path style="stroke-linejoin:round;stroke:#000000;stroke-width:6;fill:none" d="m157.52 429.78c10.05 10.99 5.39 31.63-10.4 46.06s-36.76 17.22-46.8 6.23c-10.049-11-5.389-31.63 10.4-46.06 15.72-14.37 36.57-17.21 46.68-6.36l0.12 0.13z"/><path style="stroke-linejoin:round;fill-rule:evenodd;stroke:#000000;stroke-linecap:round;stroke-width:6;fill:#ff0000" d="m158.25 427.32c10 4.4 25.15 2.18 30.2-3.53-2.58-0.54-5.01-3.15-6.51-6.17-1.58-3.17-0.15-7.29-2.82-9.74-3.06-2.79-7.3-1.26-10.54-2.94-2.85-1.47-3.77-4.59-6.72-8.06-7.07 9.56-6.45 21.01-3.61 30.44z"/><path style="stroke-linejoin:round;fill-rule:evenodd;stroke:#000000;stroke-linecap:round;stroke-width:6;fill:#ff0000" d="m102.03 483.87c-9.981-4.45-25.143-2.32-30.23 3.35 2.578 0.56 4.997 3.19 6.478 6.21 1.555 3.18 0.1 7.29 2.76 9.76 3.036 2.81 7.294 1.3 10.521 3 2.84 1.49 3.74 4.62 6.669 8.1 7.132-9.51 6.582-20.97 3.802-30.42z"/></g>`;
+        case 'candy':
+            return `<g transform="translate(-278 -354.36)"><circle cx="378" cy="453" r="95" stroke="#fff" stroke-width="10" fill-opacity="0" stroke-opacity="1"/><path d="m378 453.77s-13.75 8.52-12.33 23.79c1.42 15.25 26.72 39.51 35.33 50.73 5.08 6.62 7.41 13.49 8.51 18.06 12.92-4.43 24.6-11.54 34.42-20.62-4.16-3.98-11.17-10.44-16.67-14.06-8.18-5.39-33.61-11.74-47.78-25.13-13.78-13.02-1.48-32.77-1.48-32.77z" fill-rule="evenodd"/><path id="strip" d="m378 453.46s-13.75 8.83-12.33 24.1c1.42 15.25 26.72 39.51 35.33 50.73 5.08 6.62 7.41 13.49 8.51 18.06 12.92-4.43 24.6-11.54 34.42-20.62-4.16-3.98-11.17-10.44-16.67-14.06-8.18-5.39-33.61-11.74-47.78-25.13-13.78-13.02-1.48-33.08-1.48-33.08z" fill-rule="evenodd"/><path opacity="0" d="m93.178 199.59c-1.111-0.11-4.52-0.56-7.576-0.99-39.596-5.64-72.571-35.43-82.276-74.35-4.0224-16.12-3.8672-34.85 0.4165-50.241 4.7836-17.188 13.568-32.263 25.888-44.426 6.008-5.93 9.008-8.397 15.42-12.677 26.251-17.523 59.78-21.405 89.54-10.367 23.87 8.851 43.44 26.544 54.93 49.658 11.78 23.69 13.35 52.673 4.21 77.653-5.15 14.06-12.74 25.97-23.29 36.52-15.08 15.08-33.67 24.6-54.79 28.06-5.62 0.92-18.348 1.58-22.472 1.16zm20.692-6.07c4.73-0.69 11.02-2.09 14.83-3.3 2.06-0.66 1.99-1.17-1.13-7.75-2.57-5.43-4.84-8.5-15.09-20.33-9.65-11.14-13.822-16.34-17.533-21.85-6.003-8.92-7.809-13.91-7.485-20.69 0.275-5.75 2.422-10.47 6.968-15.33 1.736-1.86 3.012-3.37 2.835-3.37-1.034 0-7.474 3.36-9.806 5.13-3.841 2.9-5.401 4.72-7.29 8.5-1.565 3.14-1.638 3.55-1.628 9.09 0.017 9.16 2.405 17.81 9.991 36.17 5.884 14.25 6.508 16.71 7.219 28.48 0.197 3.26 0.596 5.99 0.909 6.21 0.738 0.53 10.88-0.03 17.21-0.96zm-54.161-13.01c2.969-7.02 3.307-9.2 5.199-33.65 1.222-15.78 2.313-22.89 4.616-30.05 1.861-5.8 2.946-7.68 6.425-11.14 4.668-4.64 10.067-6.755 17.461-6.836l3.809-0.042-2.627-1.243c-6.412-3.033-15.238-3.469-20.595-1.016-5.703 2.61-12.182 10.537-17.818 21.787-1.391 2.78-4.578 9.94-7.083 15.92-2.504 5.98-5.073 11.77-5.709 12.88-1.56 2.71-6.967 9.67-10.377 13.36l-2.779 3 1.072 1.45c1.339 1.81 7.283 7.18 11.617 10.49 4.387 3.35 13.659 8.88 14.58 8.7 0.406-0.07 1.4-1.7 2.209-3.61zm109.08-15.6c2.16-2.29 5.44-6.24 7.29-8.77 3.77-5.16 8.87-13.78 8.61-14.57-0.26-0.77-7.8-3.68-11.76-4.54-1.92-0.42-10.76-1.33-19.65-2.03-19.82-1.56-26.79-2.49-34.6-4.65-12.36-3.41-19.093-11.95-19.231-24.38l-0.042-3.81-1.242 2.62c-3.037 6.42-3.49 15.2-1.057 20.51 3.712 8.11 15.982 16.2 38.472 25.36 12.42 5.05 16.94 7.84 25.28 15.57 1.66 1.55 3.25 2.83 3.52 2.84s2.26-1.85 4.41-4.15zm-152.35-37.73c5.873-2.72 8.004-4.29 21.029-15.47 17.167-14.747 24.567-20.096 32.298-23.352 2.824-1.189 3.878-1.352 8.766-1.352 5.341 0 5.703 0.071 9.378 1.826 2.443 1.167 5.041 2.965 7.198 4.983 1.856 1.736 3.374 3.002 3.374 2.813s-0.763-1.977-1.696-3.973c-3.17-6.78-7.614-11.448-12.951-13.603-2.317-0.936-3.7-1.115-8.334-1.08-9.035 0.068-16.363 2.083-35.102 9.657-6.529 2.638-12.893 5.094-14.143 5.457-3.258 0.948-8.49 1.666-15.026 2.062l-5.6818 0.344v6.308c0 8.1 1.6093 18.39 4.1094 26.26 0.6204 1.96 0.6824 1.95 6.7814-0.88zm119.42-7.77c6.68-1.61 13.27-3.91 24.63-8.6 13.92-5.75 16.43-6.37 28.78-7.18l5.18-0.34-0.01-5.868c-0.02-7.727-2.24-21.047-4.53-27.067l-0.49-1.274-2.54 1c-7.5 2.959-10.66 5.159-24.12 16.815-11.14 9.647-16.35 13.824-21.86 17.534-8.91 6-13.9 7.81-20.68 7.48-5.78-0.27-10.47-2.41-15.41-7.03-3.8-3.55-3.94-3.26-1.15 2.33 3.47 6.93 8.97 11.87 14.89 13.37 3.12 0.79 11.5 0.23 17.31-1.17zm-9.96-17.13c8.05-3.707 15.33-14.551 24.43-36.392 6.26-15.032 7.56-17.237 15.54-26.307l3.51-3.989-4.02-3.867c-6.88-6.625-21.24-16.497-23.39-16.073-0.92 0.183-3.38 6.421-4.35 11.025-0.42 2.008-1 6.403-1.28 9.767s-0.95 11.457-1.49 17.985c-1.84 22.463-4.4 32.049-10.15 38.137-4.61 4.869-8.86 6.7-16.87 7.257l-5.06 0.347 2.02 0.91c7.05 3.17 15.76 3.66 21.11 1.2zm-18.07-6.566c5.82-2.912 9.87-6.851 12.31-11.991 1.19-2.501 1.32-3.355 1.31-8.586-0.01-9.158-2.4-17.805-9.99-36.168-5.83-14.107-6.46-16.585-7.22-28.355l-0.33-5.1773h-5.224c-6.618 0-15.005 1.1448-22.376 3.0544-3.166 0.8202-5.837 1.4912-5.935 1.4912-1.03 0 2.546 8.1867 5.477 12.539 0.973 1.444 6.292 7.893 11.82 14.331 14.738 17.167 20.088 24.566 23.348 32.298 1.19 2.823 1.35 3.878 1.35 8.765 0 5.341-0.07 5.704-1.82 9.379-1.18 2.468-2.97 5.044-5.06 7.271-3.55 3.799-3.26 3.943 2.34 1.149zm-5-4.162c1.18-3.415 1.4-4.901 1.43-9.596 0.03-5.022-0.1-5.837-1.34-8.476-3.812-8.139-15.541-15.915-37.521-24.878-13.412-5.469-15.445-6.66-23.946-14.03l-5.257-4.558-4.102 4.253c-2.256 2.339-5.564 6.178-7.352 8.532-3.552 4.677-9.093 13.5-9.093 14.478 0 0.724 6.725 3.406 11.235 4.482 1.738 0.414 10.433 1.321 19.322 2.015 17.822 1.392 25.111 2.27 31.567 3.804 9.351 2.222 14.232 4.987 18.304 10.367 2.671 3.529 3.963 7.598 4.293 13.513 0.15 2.726 0.45 4.771 0.67 4.546 0.22-0.226 1.03-2.23 1.79-4.452z" stroke-width="4" transform="translate(278 354.36)"/><path opacity="0" d="m93.178 199.59c-1.111-0.11-4.52-0.56-7.576-0.99-39.596-5.64-72.571-35.43-82.276-74.35-4.0224-16.12-3.8672-34.85 0.4165-50.241 4.7836-17.188 13.568-32.263 25.888-44.426 6.008-5.93 9.008-8.397 15.42-12.677 26.251-17.523 59.78-21.405 89.54-10.367 23.87 8.851 43.44 26.544 54.93 49.658 11.78 23.69 13.35 52.673 4.21 77.653-5.15 14.06-12.74 25.97-23.29 36.52-15.08 15.08-33.67 24.6-54.79 28.06-5.62 0.92-18.348 1.58-22.472 1.16zm20.692-6.07c4.73-0.69 11.02-2.09 14.83-3.3 2.06-0.66 1.99-1.17-1.13-7.75-2.57-5.43-4.84-8.5-15.09-20.33-9.65-11.14-13.822-16.34-17.533-21.85-6.003-8.92-7.809-13.91-7.485-20.69 0.275-5.75 2.422-10.47 6.968-15.33 1.736-1.86 3.012-3.37 2.835-3.37-1.034 0-7.474 3.36-9.806 5.13-3.841 2.9-5.401 4.72-7.29 8.5-1.565 3.14-1.638 3.55-1.628 9.09 0.017 9.16 2.405 17.81 9.991 36.17 5.884 14.25 6.508 16.71 7.219 28.48 0.197 3.26 0.596 5.99 0.909 6.21 0.738 0.53 10.88-0.03 17.21-0.96zm-54.161-13.01c2.969-7.02 3.307-9.2 5.199-33.65 1.222-15.78 2.313-22.89 4.616-30.05 1.861-5.8 2.946-7.68 6.425-11.14 4.668-4.64 10.067-6.755 17.461-6.836l3.809-0.042-2.627-1.243c-6.412-3.033-15.238-3.469-20.595-1.016-5.703 2.61-12.182 10.537-17.818 21.787-1.391 2.78-4.578 9.94-7.083 15.92-2.504 5.98-5.073 11.77-5.709 12.88-1.56 2.71-6.967 9.67-10.377 13.36l-2.779 3 1.072 1.45c1.339 1.81 7.283 7.18 11.617 10.49 4.387 3.35 13.659 8.88 14.58 8.7 0.406-0.07 1.4-1.7 2.209-3.61zm109.08-15.6c2.16-2.29 5.44-6.24 7.29-8.77 3.77-5.16 8.87-13.78 8.61-14.57-0.26-0.77-7.8-3.68-11.76-4.54-1.92-0.42-10.76-1.33-19.65-2.03-19.82-1.56-26.79-2.49-34.6-4.65-12.36-3.41-19.093-11.95-19.231-24.38l-0.042-3.81-1.242 2.62c-3.037 6.42-3.49 15.2-1.057 20.51 3.712 8.11 15.982 16.2 38.472 25.36 12.42 5.05 16.94 7.84 25.28 15.57 1.66 1.55 3.25 2.83 3.52 2.84s2.26-1.85 4.41-4.15zm-152.35-37.73c5.873-2.72 8.004-4.29 21.029-15.47 17.167-14.747 24.567-20.096 32.298-23.352 2.824-1.189 3.878-1.352 8.766-1.352 5.341 0 5.703 0.071 9.378 1.826 2.443 1.167 5.041 2.965 7.198 4.983 1.856 1.736 3.374 3.002 3.374 2.813s-0.763-1.977-1.696-3.973c-3.17-6.78-7.614-11.448-12.951-13.603-2.317-0.936-3.7-1.115-8.334-1.08-9.035 0.068-16.363 2.083-35.102 9.657-6.529 2.638-12.893 5.094-14.143 5.457-3.258 0.948-8.49 1.666-15.026 2.062l-5.6818 0.344v6.308c0 8.1 1.6093 18.39 4.1094 26.26 0.6204 1.96 0.6824 1.95 6.7814-0.88zm119.42-7.77c6.68-1.61 13.27-3.91 24.63-8.6 13.92-5.75 16.43-6.37 28.78-7.18l5.18-0.34-0.01-5.868c-0.02-7.727-2.24-21.047-4.53-27.067l-0.49-1.274-2.54 1c-7.5 2.959-10.66 5.159-24.12 16.815-11.14 9.647-16.35 13.824-21.86 17.534-8.91 6-13.9 7.81-20.68 7.48-5.78-0.27-10.47-2.41-15.41-7.03-3.8-3.55-3.94-3.26-1.15 2.33 3.47 6.93 8.97 11.87 14.89 13.37 3.12 0.79 11.5 0.23 17.31-1.17zm-9.96-17.13c8.05-3.707 15.33-14.551 24.43-36.392 6.26-15.032 7.56-17.237 15.54-26.307l3.51-3.989-4.02-3.867c-6.88-6.625-21.24-16.497-23.39-16.073-0.92 0.183-3.38 6.421-4.35 11.025-0.42 2.008-1 6.403-1.28 9.767s-0.95 11.457-1.49 17.985c-1.84 22.463-4.4 32.049-10.15 38.137-4.61 4.869-8.86 6.7-16.87 7.257l-5.06 0.347 2.02 0.91c7.05 3.17 15.76 3.66 21.11 1.2zm-18.07-6.566c5.82-2.912 9.87-6.851 12.31-11.991 1.19-2.501 1.32-3.355 1.31-8.586-0.01-9.158-2.4-17.805-9.99-36.168-5.83-14.107-6.46-16.585-7.22-28.355l-0.33-5.1773h-5.224c-6.618 0-15.005 1.1448-22.376 3.0544-3.166 0.8202-5.837 1.4912-5.935 1.4912-1.03 0 2.546 8.1867 5.477 12.539 0.973 1.444 6.292 7.893 11.82 14.331 14.738 17.167 20.088 24.566 23.348 32.298 1.19 2.823 1.35 3.878 1.35 8.765 0 5.341-0.07 5.704-1.82 9.379-1.18 2.468-2.97 5.044-5.06 7.271-3.55 3.799-3.26 3.943 2.34 1.149zm-5-4.162c1.18-3.415 1.4-4.901 1.43-9.596 0.03-5.022-0.1-5.837-1.34-8.476-3.812-8.139-15.541-15.915-37.521-24.878-13.412-5.469-15.445-6.66-23.946-14.03l-5.257-4.558-4.102 4.253c-2.256 2.339-5.564 6.178-7.352 8.532-3.552 4.677-9.093 13.5-9.093 14.478 0 0.724 6.725 3.406 11.235 4.482 1.738 0.414 10.433 1.321 19.322 2.015 17.822 1.392 25.111 2.27 31.567 3.804 9.351 2.222 14.232 4.987 18.304 10.367 2.671 3.529 3.963 7.598 4.293 13.513 0.15 2.726 0.45 4.771 0.67 4.546 0.22-0.226 1.03-2.23 1.79-4.452z" stroke-width="4" transform="translate(278 354.36)"/><path opacity="0" d="m93.178 199.59c-1.111-0.11-4.52-0.56-7.576-0.99-39.596-5.64-72.571-35.43-82.276-74.35-4.0224-16.12-3.8672-34.85 0.4165-50.241 4.7836-17.188 13.568-32.263 25.888-44.426 6.008-5.93 9.008-8.397 15.42-12.677 26.251-17.523 59.78-21.405 89.54-10.367 23.87 8.851 43.44 26.544 54.93 49.658 11.78 23.69 13.35 52.673 4.21 77.653-5.15 14.06-12.74 25.97-23.29 36.52-15.08 15.08-33.67 24.6-54.79 28.06-5.62 0.92-18.348 1.58-22.472 1.16zm20.692-6.07c4.73-0.69 11.02-2.09 14.83-3.3 2.06-0.66 1.99-1.17-1.13-7.75-2.57-5.43-4.84-8.5-15.09-20.33-9.65-11.14-13.822-16.34-17.533-21.85-6.003-8.92-7.809-13.91-7.485-20.69 0.275-5.75 2.422-10.47 6.968-15.33 1.736-1.86 3.012-3.37 2.835-3.37-1.034 0-7.474 3.36-9.806 5.13-3.841 2.9-5.401 4.72-7.29 8.5-1.565 3.14-1.638 3.55-1.628 9.09 0.017 9.16 2.405 17.81 9.991 36.17 5.884 14.25 6.508 16.71 7.219 28.48 0.197 3.26 0.596 5.99 0.909 6.21 0.738 0.53 10.88-0.03 17.21-0.96zm-54.161-13.01c2.969-7.02 3.307-9.2 5.199-33.65 1.222-15.78 2.313-22.89 4.616-30.05 1.861-5.8 2.946-7.68 6.425-11.14 4.668-4.64 10.067-6.755 17.461-6.836l3.809-0.042-2.627-1.243c-6.412-3.033-15.238-3.469-20.595-1.016-5.703 2.61-12.182 10.537-17.818 21.787-1.391 2.78-4.578 9.94-7.083 15.92-2.504 5.98-5.073 11.77-5.709 12.88-1.56 2.71-6.967 9.67-10.377 13.36l-2.779 3 1.072 1.45c1.339 1.81 7.283 7.18 11.617 10.49 4.387 3.35 13.659 8.88 14.58 8.7 0.406-0.07 1.4-1.7 2.209-3.61zm109.08-15.6c2.16-2.29 5.44-6.24 7.29-8.77 3.77-5.16 8.87-13.78 8.61-14.57-0.26-0.77-7.8-3.68-11.76-4.54-1.92-0.42-10.76-1.33-19.65-2.03-19.82-1.56-26.79-2.49-34.6-4.65-12.36-3.41-19.093-11.95-19.231-24.38l-0.042-3.81-1.242 2.62c-3.037 6.42-3.49 15.2-1.057 20.51 3.712 8.11 15.982 16.2 38.472 25.36 12.42 5.05 16.94 7.84 25.28 15.57 1.66 1.55 3.25 2.83 3.52 2.84s2.26-1.85 4.41-4.15zm-152.35-37.73c5.873-2.72 8.004-4.29 21.029-15.47 17.167-14.747 24.567-20.096 32.298-23.352 2.824-1.189 3.878-1.352 8.766-1.352 5.341 0 5.703 0.071 9.378 1.826 2.443 1.167 5.041 2.965 7.198 4.983 1.856 1.736 3.374 3.002 3.374 2.813s-0.763-1.977-1.696-3.973c-3.17-6.78-7.614-11.448-12.951-13.603-2.317-0.936-3.7-1.115-8.334-1.08-9.035 0.068-16.363 2.083-35.102 9.657-6.529 2.638-12.893 5.094-14.143 5.457-3.258 0.948-8.49 1.666-15.026 2.062l-5.6818 0.344v6.308c0 8.1 1.6093 18.39 4.1094 26.26 0.6204 1.96 0.6824 1.95 6.7814-0.88zm119.42-7.77c6.68-1.61 13.27-3.91 24.63-8.6 13.92-5.75 16.43-6.37 28.78-7.18l5.18-0.34-0.01-5.868c-0.02-7.727-2.24-21.047-4.53-27.067l-0.49-1.274-2.54 1c-7.5 2.959-10.66 5.159-24.12 16.815-11.14 9.647-16.35 13.824-21.86 17.534-8.91 6-13.9 7.81-20.68 7.48-5.78-0.27-10.47-2.41-15.41-7.03-3.8-3.55-3.94-3.26-1.15 2.33 3.47 6.93 8.97 11.87 14.89 13.37 3.12 0.79 11.5 0.23 17.31-1.17zm-9.96-17.13c8.05-3.707 15.33-14.551 24.43-36.392 6.26-15.032 7.56-17.237 15.54-26.307l3.51-3.989-4.02-3.867c-6.88-6.625-21.24-16.497-23.39-16.073-0.92 0.183-3.38 6.421-4.35 11.025-0.42 2.008-1 6.403-1.28 9.767s-0.95 11.457-1.49 17.985c-1.84 22.463-4.4 32.049-10.15 38.137-4.61 4.869-8.86 6.7-16.87 7.257l-5.06 0.347 2.02 0.91c7.05 3.17 15.76 3.66 21.11 1.2zm-18.07-6.566c5.82-2.912 9.87-6.851 12.31-11.991 1.19-2.501 1.32-3.355 1.31-8.586-0.01-9.158-2.4-17.805-9.99-36.168-5.83-14.107-6.46-16.585-7.22-28.355l-0.33-5.1773h-5.224c-6.618 0-15.005 1.1448-22.376 3.0544-3.166 0.8202-5.837 1.4912-5.935 1.4912-1.03 0 2.546 8.1867 5.477 12.539 0.973 1.444 6.292 7.893 11.82 14.331 14.738 17.167 20.088 24.566 23.348 32.298 1.19 2.823 1.35 3.878 1.35 8.765 0 5.341-0.07 5.704-1.82 9.379-1.18 2.468-2.97 5.044-5.06 7.271-3.55 3.799-3.26 3.943 2.34 1.149zm-5-4.162c1.18-3.415 1.4-4.901 1.43-9.596 0.03-5.022-0.1-5.837-1.34-8.476-3.812-8.139-15.541-15.915-37.521-24.878-13.412-5.469-15.445-6.66-23.946-14.03l-5.257-4.558-4.102 4.253c-2.256 2.339-5.564 6.178-7.352 8.532-3.552 4.677-9.093 13.5-9.093 14.478 0 0.724 6.725 3.406 11.235 4.482 1.738 0.414 10.433 1.321 19.322 2.015 17.822 1.392 25.111 2.27 31.567 3.804 9.351 2.222 14.232 4.987 18.304 10.367 2.671 3.529 3.963 7.598 4.293 13.513 0.15 2.726 0.45 4.771 0.67 4.546 0.22-0.226 1.03-2.23 1.79-4.452z" stroke-width="4" transform="translate(278 354.36)"/><path opacity="0" d="m93.178 199.59c-1.111-0.11-4.52-0.56-7.576-0.99-39.596-5.64-72.571-35.43-82.276-74.35-4.0224-16.12-3.8672-34.85 0.4165-50.241 4.7836-17.188 13.568-32.263 25.888-44.426 6.008-5.93 9.008-8.397 15.42-12.677 26.251-17.523 59.78-21.405 89.54-10.367 23.87 8.851 43.44 26.544 54.93 49.658 11.78 23.69 13.35 52.673 4.21 77.653-5.15 14.06-12.74 25.97-23.29 36.52-15.08 15.08-33.67 24.6-54.79 28.06-5.62 0.92-18.348 1.58-22.472 1.16zm20.692-6.07c4.73-0.69 11.02-2.09 14.83-3.3 2.06-0.66 1.99-1.17-1.13-7.75-2.57-5.43-4.84-8.5-15.09-20.33-9.65-11.14-13.822-16.34-17.533-21.85-6.003-8.92-7.809-13.91-7.485-20.69 0.275-5.75 2.422-10.47 6.968-15.33 1.736-1.86 3.012-3.37 2.835-3.37-1.034 0-7.474 3.36-9.806 5.13-3.841 2.9-5.401 4.72-7.29 8.5-1.565 3.14-1.638 3.55-1.628 9.09 0.017 9.16 2.405 17.81 9.991 36.17 5.884 14.25 6.508 16.71 7.219 28.48 0.197 3.26 0.596 5.99 0.909 6.21 0.738 0.53 10.88-0.03 17.21-0.96zm-54.161-13.01c2.969-7.02 3.307-9.2 5.199-33.65 1.222-15.78 2.313-22.89 4.616-30.05 1.861-5.8 2.946-7.68 6.425-11.14 4.668-4.64 10.067-6.755 17.461-6.836l3.809-0.042-2.627-1.243c-6.412-3.033-15.238-3.469-20.595-1.016-5.703 2.61-12.182 10.537-17.818 21.787-1.391 2.78-4.578 9.94-7.083 15.92-2.504 5.98-5.073 11.77-5.709 12.88-1.56 2.71-6.967 9.67-10.377 13.36l-2.779 3 1.072 1.45c1.339 1.81 7.283 7.18 11.617 10.49 4.387 3.35 13.659 8.88 14.58 8.7 0.406-0.07 1.4-1.7 2.209-3.61zm109.08-15.6c2.16-2.29 5.44-6.24 7.29-8.77 3.77-5.16 8.87-13.78 8.61-14.57-0.26-0.77-7.8-3.68-11.76-4.54-1.92-0.42-10.76-1.33-19.65-2.03-19.82-1.56-26.79-2.49-34.6-4.65-12.36-3.41-19.093-11.95-19.231-24.38l-0.042-3.81-1.242 2.62c-3.037 6.42-3.49 15.2-1.057 20.51 3.712 8.11 15.982 16.2 38.472 25.36 12.42 5.05 16.94 7.84 25.28 15.57 1.66 1.55 3.25 2.83 3.52 2.84s2.26-1.85 4.41-4.15zm-152.35-37.73c5.873-2.72 8.004-4.29 21.029-15.47 17.167-14.747 24.567-20.096 32.298-23.352 2.824-1.189 3.878-1.352 8.766-1.352 5.341 0 5.703 0.071 9.378 1.826 2.443 1.167 5.041 2.965 7.198 4.983 1.856 1.736 3.374 3.002 3.374 2.813s-0.763-1.977-1.696-3.973c-3.17-6.78-7.614-11.448-12.951-13.603-2.317-0.936-3.7-1.115-8.334-1.08-9.035 0.068-16.363 2.083-35.102 9.657-6.529 2.638-12.893 5.094-14.143 5.457-3.258 0.948-8.49 1.666-15.026 2.062l-5.6818 0.344v6.308c0 8.1 1.6093 18.39 4.1094 26.26 0.6204 1.96 0.6824 1.95 6.7814-0.88zm119.42-7.77c6.68-1.61 13.27-3.91 24.63-8.6 13.92-5.75 16.43-6.37 28.78-7.18l5.18-0.34-0.01-5.868c-0.02-7.727-2.24-21.047-4.53-27.067l-0.49-1.274-2.54 1c-7.5 2.959-10.66 5.159-24.12 16.815-11.14 9.647-16.35 13.824-21.86 17.534-8.91 6-13.9 7.81-20.68 7.48-5.78-0.27-10.47-2.41-15.41-7.03-3.8-3.55-3.94-3.26-1.15 2.33 3.47 6.93 8.97 11.87 14.89 13.37 3.12 0.79 11.5 0.23 17.31-1.17zm-9.96-17.13c8.05-3.707 15.33-14.551 24.43-36.392 6.26-15.032 7.56-17.237 15.54-26.307l3.51-3.989-4.02-3.867c-6.88-6.625-21.24-16.497-23.39-16.073-0.92 0.183-3.38 6.421-4.35 11.025-0.42 2.008-1 6.403-1.28 9.767s-0.95 11.457-1.49 17.985c-1.84 22.463-4.4 32.049-10.15 38.137-4.61 4.869-8.86 6.7-16.87 7.257l-5.06 0.347 2.02 0.91c7.05 3.17 15.76 3.66 21.11 1.2zm-18.07-6.566c5.82-2.912 9.87-6.851 12.31-11.991 1.19-2.501 1.32-3.355 1.31-8.586-0.01-9.158-2.4-17.805-9.99-36.168-5.83-14.107-6.46-16.585-7.22-28.355l-0.33-5.1773h-5.224c-6.618 0-15.005 1.1448-22.376 3.0544-3.166 0.8202-5.837 1.4912-5.935 1.4912-1.03 0 2.546 8.1867 5.477 12.539 0.973 1.444 6.292 7.893 11.82 14.331 14.738 17.167 20.088 24.566 23.348 32.298 1.19 2.823 1.35 3.878 1.35 8.765 0 5.341-0.07 5.704-1.82 9.379-1.18 2.468-2.97 5.044-5.06 7.271-3.55 3.799-3.26 3.943 2.34 1.149zm-5-4.162c1.18-3.415 1.4-4.901 1.43-9.596 0.03-5.022-0.1-5.837-1.34-8.476-3.812-8.139-15.541-15.915-37.521-24.878-13.412-5.469-15.445-6.66-23.946-14.03l-5.257-4.558-4.102 4.253c-2.256 2.339-5.564 6.178-7.352 8.532-3.552 4.677-9.093 13.5-9.093 14.478 0 0.724 6.725 3.406 11.235 4.482 1.738 0.414 10.433 1.321 19.322 2.015 17.822 1.392 25.111 2.27 31.567 3.804 9.351 2.222 14.232 4.987 18.304 10.367 2.671 3.529 3.963 7.598 4.293 13.513 0.15 2.726 0.45 4.771 0.67 4.546 0.22-0.226 1.03-2.23 1.79-4.452z" stroke-width="4" transform="translate(278 354.36)"/><use xlink:href="#strip" transform="matrix(.70711 .70711 -.70711 .70711 431.36 -134.47)" height="200" width="200" y="0" x="0"/><use xlink:href="#strip" transform="matrix(0 1 -1 0 831.46 75.459)" height="200" width="200" y="0" x="0"/><use xlink:href="#strip" transform="matrix(-.70711 .70711 -.70711 -.70711 965.93 506.82)" height="200" width="200" y="0" x="0"/><use xlink:href="#strip" transform="matrix(-1 0 0 -1 756 906.92)" height="200" width="200" y="0" x="0"/><use xlink:href="#strip" transform="matrix(-.70711 -.70711 .70711 -.70711 324.64 1041.4)" height="200" width="200" y="0" x="0"/><use xlink:href="#strip" transform="matrix(0 -1 1 0 -75.459 831.46)" height="200" width="200" y="0" x="0"/><use xlink:href="#strip" transform="matrix(.70711 -.70711 .70711 .70711 -209.93 400.1)" height="200" width="200" y="0" x="0"/></g>`;
         case 'ghost':
             return `<g transform="translate(-155.47 -349.08)"><path style="fill-rule:evenodd;fill-opacity:.23529" d="m173.41 714.4c14.34 14.61 41.61 3.99 64.07 11.77 18.22 6.31 26.89 47.49 48.08 40.02 21.2-7.48 57.12-26.89 80.97-20.3 23.84 6.59 53.55 51.28 72.75 29.46 16.3-18.54 24.1-64.75 64.89-60.09 40.9 4.67 49.73 1.54 44.24-48.91-3.18-29.27 22.2-53.58-12.14-76.31-53.56-35.44-138.73-13.39-190.34 21.28-59.09 39.69-194.07 81.13-172.52 103.08z"/><path style="fill-opacity:.62745" d="m497.32 591.87c0 75.86 35.79 95.42 35.79 130.6 0 19.52-35.4-24.07-55.26-14.2-18.42 9.15-41.11 17.79-64.14 4.16-13.72-8.12 5.41-21.33-21.11-21.33-21.15 0-53.39 13.1-73.56 15.92-18.34 2.56-37.91-14.19-70.27-4.64-20.11 5.94-91.3 48.27-91.3 28.76 0-24.85 33.28-51.93 33.28-139.27 0-84.62 68.67-153.29 153.28-153.29 84.62 0 153.29 68.67 153.29 153.29z" transform="matrix(1 0 0 1.1622 0 -158.65)"/><path style="stroke-linejoin:round;fill-opacity:.62745;stroke:#000000;stroke-linecap:round;stroke-width:3.7104" d="m497.32 591.87c0 75.86 35.79 95.42 35.79 130.6 0 19.52-48.88 5.28-68.74 15.15-18.42 9.15-10.87 22.93-37.4 31.77-19.05 6.36-44.46-22.61-70.98-22.61-21.15 0-60.19 24.42-78.53 16.66s-16.6-33.62-44.95-36.12c-21.16-1.86-75.04 23.33-75.04 3.82 0-24.85 33.28-51.93 33.28-139.27 0-84.62 68.67-153.29 153.28-153.29 84.62 0 153.29 68.67 153.29 153.29z" transform="matrix(1 0 0 1.1622 0 -158.65)"/><path style="stroke-linejoin:round;stroke:#000000;stroke-linecap:round;stroke-width:4;fill:#ffffff" d="m293.5 439.04c-20.56 0-37.25 19.18-37.25 42.8 0 23.63 16.69 42.81 37.25 42.81 15.89 0 29.46-11.47 34.81-27.57 5.35 16.1 18.93 27.57 34.81 27.57 20.57 0 37.26-19.18 37.25-42.81 0-23.62-16.68-42.8-37.25-42.8-15.88 0-29.45 11.43-34.81 27.53-5.35-16.1-18.92-27.53-34.81-27.53z"/><path style="fill:#000000" d="m497.32 591.87a153.29 153.29 0 1 1 -306.57 0 153.29 153.29 0 1 1 306.57 0z" transform="matrix(.10522 0 0 .10565 318.09 426.67)"/><path style="fill:#000000" d="m497.32 591.87a153.29 153.29 0 1 1 -306.57 0 153.29 153.29 0 1 1 306.57 0z" transform="matrix(.10522 0 0 .10565 266.9 426.67)"/><path style="fill-rule:evenodd;fill:#000000;fill-opacity:.11765" d="m444.06 411.72c5.91-2.08 35.6 37.21 41.02 78.49 3.68 28.08 2.12 71.42 6.36 96.17s40.91 88.99 26.16 88.39c-34.65-1.42-56.75-57.15-48.84-136.87 8.92-89.9-38.62-121.27-24.7-126.18z"/><path style="fill-rule:evenodd;fill:#000000;fill-opacity:.11765" d="m458.21 691.03c-8.02 7.86-22.63 45.26-30.41 28.28-7.78-16.97-1.29-47.19-7.07-91.92-4.4-34.02-20.59-74.62-8.68-68.44 11.87 6.17 20.49 24.75 31.31 57.13 9.45 28.3 24.45 65.54 14.85 74.95z"/><path style="fill-rule:evenodd;fill:#000000;fill-opacity:.11765" d="m342.94 700.42c-7.67 8.19-26.44 17.95-35.94 16.1-12.51-2.43-14.44-44.39-9.41-71.66 4.95-26.87 14.48-66.04 22.45-71.92 9.69-7.14 0.7 26.78 9.79 73.41 6.96 35.68 20.6 46.07 13.11 54.07z"/><path style="fill-rule:evenodd;fill:#000000;fill-opacity:.11765" d="m240.42 677.6c-11.11-1.62-21.62 1.14-30.41 3.53-12.3 3.35-0.78-15.15 15.56-47.38 12.35-24.36 15.25-49.48 22.42-56.31 8.53-8.14-2.39 23.7-4.42 54.62-1.88 28.69 5.04 46.73-3.15 45.54z"/><path style="fill-rule:evenodd;fill:#ffffff;fill-opacity:.62745" d="m217.08 459.1c27.34-73.67 79.96-89.14 93.34-88.39 20.33 1.14 14.72 30.62-24.75 41.01-40.23 10.59-82.97 86.14-68.59 47.38z"/></g>`;
         case 'turkey':
@@ -1139,6 +1303,8 @@ export function svgIcons(icon){
             return `<path d="M20.84374,12h-2V10h2A3.27787,3.27787,0,0,1,20.84374,12Z"/><path d="M5.15629,12h-2a3.27809,3.27809,0,0,1,0-2h2Z"/><path d="M12,2C7.58173,2,4,5.47711,4,11s2,11,8,11,8-5.47717,8-11S16.41827,2,12,2Zm2.75,1.5a.75.75,0,1,1-.75.75A.75.75,0,0,1,14.75,3.5Zm0,2.75A.75.75,0,1,1,14,7,.75.75,0,0,1,14.75,6.25ZM12,8c1.10455,0,2,.22382,2,.5s-.89545.5-2,.5-2-.22388-2-.5S10.89545,8,12,8ZM9.25,3.5a.75.75,0,1,1-.75.75A.75.75,0,0,1,9.25,3.5Zm0,2.75A.75.75,0,1,1,8.5,7,.75.75,0,0,1,9.25,6.25ZM5.5,7.75a.75.75,0,1,1,.75.75A.75.75,0,0,1,5.5,7.75Zm.62769,9.20612c-.19525-.19525.2796-.98669,1.06067-1.76776s1.57251-1.25592,1.76776-1.06067-.2796.98669-1.06067,1.76776S6.32294,17.15137,6.12769,16.95612ZM9,18.75A.75.75,0,1,1,9.75,18,.75.75,0,0,1,9,18.75ZM10.95465,11c-1,2.91949-3.45026,1.66388-3.67859,1.1795-.55939-.66034-.47235-3.69159,2.21887-2.56122C10.71344,10.13007,11.0484,10.625,10.95465,11ZM12,17.75a.75.75,0,1,1,.75-.75A.75.75,0,0,1,12,17.75Zm0-3a.75.75,0,1,1,.75-.75A.75.75,0,0,1,12,14.75ZM13.01483,11c-.09375-.375.24121-.86993,1.45972-1.38171,2.69122-1.13037,2.77826,1.90088,2.21887,2.56122C16.46509,12.66388,14.01483,13.91949,13.01483,11ZM15,18.75a.75.75,0,1,1,.75-.75A.75.75,0,0,1,15,18.75Zm2.87231-1.79388c-.19525.19525-.98676-.2796-1.76776-1.06067s-1.25592-1.57251-1.06067-1.76776.98669.2796,1.76776,1.06067S18.06757,16.76086,17.87231,16.95612ZM17.75,8.5a.75.75,0,1,1,.75-.75A.75.75,0,0,1,17.75,8.5Z"/>`;
         case 'skull':
             return `<path d="m30.362 300.67c-9.562-4 4.674-22.67-11.704-18.5-13.434 0.19-21.11-18.33-10.678-27.2 10.248-10.25 24.784-0.19 34.855 5.2 4.056 3.09 8.181 5.29 12.757 1.75 46.946-18.76 93.976-37.39 140.09-58.12 16.22-4.86 12.14-22.05 16.05-34.42 7.66-11.48 28.09-5.95 33.45 5.38 6.89 10.91-19.13 21.04-6.91 27.85 7.08-21.34 27.15 5.55 13.16 15.37-8.8 9.66-25.09 6.32-31.32-4.52-7.96-10.26-21.18 6.19-31.51 7.72-36.39 15.87-75.15 25.84-110.58 44.01-13.621 3.29-25.112 12.5-23.962 27.21-5.639 6.48-15.352 9.21-23.694 8.27zm155.06-2.8c-14.94-4.23-1.67-29.35-16.05-33.68-9.9-3.31-29.06-10.8-31.81-17.13 6.06-0.53 12.56-8.18 18.19-2.98 11.6 6.04 24.96 15.21 38.18 8.24 11.68-7.97 28.7-2.35 32.87 11.2 1.55 15.59-22.09-5.85-23.58 3.39 18.4-0.32 22.89 28.04 3.69 30.84-6.97 1.5-14.57 2.12-21.49 0.12zm-92.45-63.84c-19.632-4.67-36.938-16.19-56.756-20.1-11.642 9.38-33.324 9.81-35.177-9.01-5.281-15.5 10.709-19.7 22.441-16.41 8.181-0.93-6.805-15.5 6.788-14.86 14.56-8.06 32.046 6.73 19.835 21.2-5.874 14.39 17.304 16.98 26.449 21.52 11.243 5.47 30.78 7.44 36.9 14.94-5.62 6.03-13.34 4.91-20.48 2.72zm52.31-27.09c-6.06-7.92-15.78-6.19-17.32 3.9-6.12-6.1-13.69-16.12-18.15-3.18-11.87 14.92-20.769-28.31-26.358-6.79 1.848 7.62-14.392 6.84-12.795-0.92 2.01-12.73-13.028-31.47 0.495-39.96 6.023 1.5 17.422 4.2 9.805-5.61-9.276-16-31.097 7.69-39.754-12.72-10.715-11.21-7.579-28.52 4.509-37.18 3.021-3.76 8.65-6.51 6.941-12.103 0.196-5.278-0.964-10.999 0.075-16.001 4.209-6.198 14.011-14.079 6.665-21.445-7.404-6.959 2.858 11.572-7.041 13.802-9.992 5.343-1.944 29.337-12.044 27.747-6.102-12.634-8.115-27.436-1.494-40.387 10.133-28.248 36.182-49.248 65.776-53.734 25.61-3.8486 52.95-3.7081 77.35 5.81 21.9 9.634 35.63 31.871 42.04 54.093 1.12 7.296 0.96 14.706 1.35 22.062-10.21 7.197-6.61 19.666-2.77 29.556 5.01 14.06-3.59 28.79-13.14 38.62-11.13 4.38-29.15-0.71-33.49 14.48 8.43 1.59 21.94 1.77 14.11 15.35-5.85 11.16-15.02 28.24-30.23 23.06-3.84 7.87-6.74 7.98-14.53 1.55zm-21.74-60.41c4-7.36 5.71-19.56 4.3-27.04-9.97 2.06-18.69 35.14-4.3 27.04zm29.29 0.95c2.02-9.15-5.67-30.54-15.78-26.02 4.37 7.62 0.98 33.83 15.78 26.02zm-30.72-33.63c8.97-8.29 2.46-27.466-5.81-35.067-13.06-10.201-35.244-14.651-46.574 0.532-9.412 8.725-6.792 23.545 2.988 30.825 11.709 8.83 27.606 5.45 41.296 5.67 2.78-0.19 5.63-0.56 8.1-1.96zm70.91-1.1c11-5.02 21.48-19.639 12.33-30.956-8.5-13.779-26.85-16.801-40.69-9.682-15.1 4.068-21.28 19.249-21.73 33.568 4.42 14.74 25.96 7.89 37.82 9.2 4.14-0.24 8.44-0.34 12.27-2.13z"/>`;
+        case 'taijitu':
+            return `<path d="M 139.55,2.35 C 139.29,2.33 127.25,0.67 127.00,0.66 122.14,0.40 118.79,0.41 118.23,0.42 53.21,1.34 0.88,54.51 0.40,120.01 0.40,185.52 53.37,238.73 118.68,239.56 116.51,236.96 114.91,237.91 111.76,235.89 98.53,235.29 83.95,231.73 76.72,228.56 59.85,221.96 52.97,215.57 38.92,204.01 23.47,189.14 3.91,158.83 4.11,120.68 4.05,106.23 7.80,76.73 28.95,47.92 41.59,33.20 60.81,14.93 92.86,6.89 106.17,3.56 121.17,2.64 141.20,4.21 141.20,4.21 139.55,2.35 139.55,2.35 Z M 120.00,40.27 C 131.00,40.27 139.93,49.20 139.93,60.20 139.93,71.21 131.00,80.14 120.00,80.14 109.00,80.14 100.07,71.21 100.07,60.20 100.07,49.20 109.00,40.27 120.00,40.27 Z M 120.00,239.60 C 120.59,239.60 121.18,239.59 121.77,239.57 186.97,238.62 239.60,185.42 239.60,119.98 239.60,54.48 186.85,1.23 121.54,0.40 153.84,1.22 179.80,27.68 179.80,60.18 179.80,93.19 153.01,119.98 120.00,119.98 86.99,119.98 60.20,146.78 60.20,179.79 60.20,212.80 86.99,239.60 120.00,239.60 120.00,239.60 120.00,239.60 120.00,239.60 Z M 120.00,199.73 C 109.00,199.73 100.07,190.80 100.07,179.79 100.07,168.79 109.00,159.86 120.00,159.86 131.00,159.86 139.93,168.79 139.93,179.79 139.93,190.80 131.00,199.73 120.00,199.73 Z"/>`;
         //case 'pizza':
         //    return `<path d="m129.15 0.019c-2.412 0.612-4.428 1.836-5.904 3.816-1.475 1.98-2.555 4.536-3.096 7.956-9.973 8.028-18.216 15.48-25.272 22.5-7.128 6.948-9.612 12.816-16.632 19.404-7.164 6.516-12.168 6.912-25.272 20.052-13.248 13.212-30.528 32.4-52.956 58.536l7.956 12.096c10.188-0.359 25.02-1.332 45.324-2.771 20.34-1.512 49.068-3.78 75.492-6.229 26.387-2.592 52.992-5.544 81.359-9 1.08-1.008 2.232-2.34 3.457-4.14 1.188-1.908 2.412-3.924 3.814-6.588-1.08-6.588-2.627-12.708-4.5-19.044-2.051-6.372-4.355-12.96-6.912-18.36-2.592-5.436-5.363-8.604-8.314-13.824-3.096-5.328-4.176-10.62-10.045-17.676-6.084-7.236-15.875-17.064-25.631-24.912-9.91-7.883-20.63-15.011-32.88-21.815z" i:knockout="Off" fill="#000000" /> <path d="m3.119 132.61c6.768 0.72 16.344 0.611 29.412-0.324 13.104-1.116 34.38-4.68 48.132-5.544 13.536-0.864 19.368 0.936 32.904 0.684 13.572-0.396 33.084-1.296 47.412-2.411 14.148-1.08 26.064-2.521 36.721-4.177 1.404-4.176 3.492-6.66 6.551-7.596 2.988-0.972 6.805-0.288 11.449 2.052l-6.229 10.044c-5.473 0.685-15.443 1.836-30.492 3.456-15.156 1.512-38.447 4.032-59.184 5.904-20.772 1.764-45.756 3.384-64.404 4.86-18.684 1.331-33.984 2.483-46.728 3.456-1.841-3.45-3.677-6.91-5.549-10.4z" i:knockout="Off" /> <path d="m2.794 130.88c5.112-4.859 10.764-10.8 17.64-18.359 6.84-7.668 15.012-18.54 22.86-26.641 7.668-8.172 16.884-16.56 23.184-21.816 6.12-5.292 9.972-5.832 14.184-9.684 4.068-3.996 7.812-9.468 11.088-13.5 3.348-4.068 3.888-5.724 9-10.404 5.148-4.716 11.916-10.548 21.132-17.64 2.375 2.556 5.904 5.688 10.729 9.684 4.859 3.888 12.527 8.784 18 13.86 5.363 5.148 9.719 11.592 14.184 16.272 4.355 4.428 9.467 6.012 12.131 10.728 2.592 4.788 1.152 12.708 3.457 17.64 2.305 4.823 7.92 7.271 10.043 11.088 2.018 3.744 0.9 6.516 2.053 11.088 1.008 4.536 2.447 9.504 4.176 15.588-12.023 1.8-24.875 3.348-39.131 4.5-14.438 1.152-33.156 2.088-46.045 2.412-12.888 0.107-19.152-1.584-30.456-1.044-11.52 0.576-24.264 3.42-37.404 4.5-13.141 1.04-26.605 1.61-40.826 1.72z" i:knockout="Off" /> <path d="m130.88 2.431c-2.484-0.288-4.5 0.504-5.904 2.088-1.439 1.656-2.412 4.104-2.771 7.632 3.059 2.196 6.588 4.896 10.727 7.956 4.068 3.06 9.758 6.84 13.861 10.368 3.924 3.456 7.199 6.876 10.404 10.404 3.131 3.42 5.436 6.876 9 10.368 3.6 3.312 9.791 5.544 12.455 10.044 2.52 4.5 1.729 12.78 2.771 16.632 0.9 3.673 1.189 3.204 3.098 5.544 1.943 2.305 6.658 5.112 8.314 8.28 1.512 2.988-0.252 5.868 0.686 10.044 0.898 4.141 2.268 9.108 4.5 14.904 0.143-3.78 1.691-5.977 4.5-6.588 2.844-0.612 6.91 0.216 12.49 2.771-1.188-9.288-3.275-17.496-6.264-24.912-3.096-7.451-8.135-13.176-11.771-19.404-3.564-6.3-5.832-11.844-10.008-18-4.355-6.264-7.957-11.916-15.947-19.044-8.209-7.38-25.813-18.9-32.545-23.868-6.77-4.887-9.25-6.579-7.6-5.211z" i:knockout="Off" /> <path d="m92.435 90.02c-1.8-2.628-2.376-5.364-1.728-8.641 0.648-3.384 2.268-8.207 5.544-10.728 3.24-2.592 8.712-4.536 13.5-4.176 4.679 0.396 11.521 2.808 14.544 6.264 2.916 3.384 3.959 7.848 3.131 13.824-3.924-1.296-7.164-1.872-9.719-1.729-2.629 0.108-4.861 0.973-5.869 2.448-1.043 1.404-1.404 3.313-0.684 5.868-4.068-2.196-7.056-3.168-9.36-2.772s-3.636 1.872-4.14 4.86c-1.724-1.726-3.451-3.455-5.215-5.218z" i:knockout="Off" fill="#000000" /> <path d="m93.119 87.967c-1.116-2.447-1.44-4.896-0.684-7.632 0.684-2.808 1.8-6.66 4.86-8.64 2.952-2.052 8.424-3.96 12.817-3.492 4.355 0.396 10.26 3.06 13.139 5.904 2.736 2.808 3.889 6.336 3.457 10.728-1.836-1.296-4.068-2.124-6.553-2.088-2.699-0.144-6.84 0.396-8.676 1.765-1.908 1.403-2.412 3.491-2.052 6.552-2.736-2.124-5.22-3.097-7.308-2.772-2.232 0.252-3.924 1.8-5.508 4.5-1.154-1.585-2.305-3.205-3.493-4.825z" i:knockout="Off" /> <path d="m137.11 88.291c0.215 2.844 1.223 7.344 4.139 10.729 2.809 3.312 7.273 7.56 12.816 9 5.58 1.332 16.344 1.691 20.088-1.008 3.457-2.952 3.527-10.837 1.045-15.589-2.629-4.823-10.369-10.872-16.273-12.456-5.939-1.584-15.479 1.44-19.043 3.097-3.72 1.513-3.07 3.313-2.78 6.229z" i:knockout="Off" fill="#000000" /> <path d="m138.3 88.363c0.18 2.808 1.152 6.768 3.889 10.08 2.699 3.06 6.768 7.128 12.059 8.46 5.184 1.224 15.408 1.548 18.865-0.972 3.348-2.809 3.311-10.152 1.008-14.652-2.557-4.572-9.756-10.152-15.336-11.736-5.652-1.476-14.438 1.404-17.893 2.952-3.39 1.333-2.96 3.241-2.6 5.869z" i:knockout="Off" /> <path d="m37.066 90.379c3.6 2.305 7.884 3.276 13.14 2.772 5.22-0.612 14.508-2.196 18-5.868 3.276-3.708 2.628-11.988 2.088-15.948-0.612-4.068-2.196-6.624-5.184-7.956-8.316 7.92-14.688 14.148-19.404 18.684-4.68 4.464-7.56 7.236-8.64 8.316z" i:knockout="Off" fill="#000000" /> <path d="m40.522 90.379c2.124-2.844 5.184-6.264 9.324-10.403 4.104-4.212 9.144-9 15.264-14.508 1.944 0.684 3.204 2.34 3.78 5.508 0.576 3.06 1.116 9.504-0.324 12.816-1.656 3.132-5.148 4.788-8.676 6.229-3.564 1.332-8.892 1.979-12.096 2.088-3.239 0.035-5.615-0.542-7.272-1.73z" i:knockout="Off" /> <path d="m115.98 55.423c-2.305 0.036 0.936 6.768 4.176 10.044 3.205 3.312 8.1 8.316 14.545 9.324 6.227 0.828 19.619-2.772 22.824-4.14 2.986-1.476-0.145-3.24-4.141-4.176-4.104-1.044-13.068 0-19.404-1.728-6.3-1.872-15.73-9.468-18-9.324z" i:knockout="Off" fill="#000000" /> <path d="m157.2 68.923c-2.592 1.296-5.76 2.376-9.361 3.096-3.779 0.72-8.387 2.161-12.455 1.404-4.068-0.899-8.785-3.528-11.771-6.228-3.098-2.664-5.293-5.904-6.588-9.72 2.41 2.952 5.039 5.544 8.314 7.632 3.133 2.124 5.365 4.068 10.729 4.86 5.37 0.648 12.28 0.252 21.14-1.044z" i:knockout="Off" /> <path d="m119.11 57.835c2.986 2.484 6.047 4.392 9.322 5.868 3.168 1.404 5.869 2.052 10.045 2.772 4.141 0.648 9.107 1.116 14.904 1.404-4.033 0.648-7.775 1.044-11.088 1.044-3.348-0.036-5.652 0.216-9-1.044-3.564-1.476-9.432-5.22-11.771-6.912-2.34-1.728-3.24-2.772-2.41-3.132z" i:knockout="Off" /> <path d="m89.663 98.695c-2.304 2.771-4.428 4.428-6.228 4.824-1.908 0.359-4.032-0.396-4.824-2.412-0.936-2.124-1.584-5.725 0-9.685 1.656-4.031 4.752-8.712 9.684-14.184l-0.684-5.22c-7.632 3.672-12.528 7.812-15.264 12.816-2.664 4.933-1.872 12.564-0.684 16.632 1.044 3.925 4.572 5.797 7.272 7.272 2.664 1.476 6.804 2.952 8.676 1.368 1.835-1.66 2.375-5.51 2.052-11.415z" i:knockout="Off" fill="#000000" /> <path d="m87.935 103.52c0.36 2.628 0.18 4.607-0.684 5.544-0.936 0.792-2.628 1.044-4.5 0.359-2.052-0.756-4.752-2.304-6.588-3.815-1.764-1.548-2.988-2.664-3.816-4.86s-1.116-5.004-1.008-8.28c0.216 3.744 1.116 6.805 3.096 9.324 1.836 2.412 6.048 5.185 8.316 5.544 2.231 0.34 3.959-1.03 5.184-3.8z" i:knockout="Off" /> <path d="m87.935 101.43l-0.108 1.619c-0.756 1.44-1.548 2.521-2.52 3.097-1.044 0.611-1.8 0.899-3.384 0.324-1.728-0.828-4.824-2.7-6.372-4.5-1.512-1.944-2.556-4.032-2.988-6.265-0.648-2.268-1.296-4.607-0.54-7.02 0.612-2.592 2.016-5.544 4.5-8.028 2.484-2.52 5.76-4.86 10.224-7.02l0.648 3.708c-2.448 2.376-4.536 4.896-6.264 7.703-1.944 2.7-3.744 5.904-4.284 8.784-0.54 2.809 0.432 6.696 1.548 8.46 1.08 1.656 3.276 2.124 4.932 1.98 1.619-0.1 3.06-1.15 4.608-2.84z" i:knockout="Off" /> <path d="m31.522 104.92c6.876 3.276 12.564 6.624 17.64 10.044 5.04 3.385 8.892 6.841 12.132 10.368l6.552-8.315c-5.436-6.156-10.8-10.656-16.236-13.5-5.508-2.916-10.8-4.177-16.308-3.78-1.26 1.73-2.519 3.46-3.78 5.18z" i:knockout="Off" fill="#000000" /> <path d="m32.999 104.82c2.988 1.584 5.796 2.987 8.568 4.607 2.7 1.513 4.284 2.089 7.668 4.645 3.24 2.448 7.308 5.832 12.06 10.151l1.008-1.367c-3.708-3.816-7.452-6.984-11.376-9.792-4.032-2.845-9.252-5.364-12.168-6.876-2.916-1.62-4.68-2.448-5.292-2.484-0.144 0.35-0.288 0.71-0.468 1.11z" i:knockout="Off" /> <path d="m34.115 102.44l1.908-2.017c5.148 0.504 9.612 1.513 13.536 3.168 3.888 1.656 7.02 4.284 9.936 6.624 2.844 2.269 5.076 4.465 6.984 6.876l-3.96 5.185c-3.312-3.96-6.876-7.164-10.692-10.008-4.032-2.916-9.36-5.221-12.384-6.769-2.988-1.548-4.716-2.304-5.328-2.268v-0.79z" i:knockout="Off" /> <path d="m132.93 121.59c1.189 1.044 2.988-3.743 3.313-6.983 0.145-3.313 0.432-8.424-2.051-12.132-2.629-3.816-10.945-9.108-13.141-10.044-2.305-1.009-1.584 1.584-0.18 4.176 1.26 2.52 6.371 6.804 8.387 11.052 2.02 4.14 2.41 12.67 3.67 13.93z" i:knockout="Off" fill="#000000" /> <path d="m120.33 93.439c1.98 0.684 3.889 1.872 6.121 3.42 2.16 1.512 5.039 3.384 6.695 5.904 1.477 2.483 2.305 6.191 2.34 9.18 0.037 2.844-0.611 5.544-1.943 8.1 0.359-2.735 0.504-5.363 0.035-8.027-0.504-2.772-0.395-4.824-2.592-7.956-2.27-3.12-5.72-6.614-10.66-10.611z" i:knockout="Off" /> <path d="m132.72 118.78c-0.217-2.771-0.541-5.4-1.369-7.74-0.826-2.447-1.764-4.14-3.348-6.588-1.656-2.592-3.744-5.292-6.408-8.496 2.305 1.8 4.213 3.528 5.869 5.328 1.512 1.764 2.809 2.664 3.744 5.22 0.863 2.448 1.764 7.381 2.016 9.505 0.26 2.1 0.04 2.93-0.5 2.78z" i:knockout="Off" /> <path d="m138.3 88.363c0.18 2.808 1.152 6.768 3.889 10.08 2.699 3.06 6.768 7.128 12.059 8.46 5.184 1.224 15.408 1.548 18.865-0.972 3.348-2.809 3.311-10.152 1.008-14.652-2.557-4.572-9.756-10.152-15.336-11.736-5.652-1.476-14.438 1.404-17.893 2.952-3.39 1.333-2.96 3.241-2.6 5.869z" i:knockout="Off" /> <path d="m106.15 33.499c0.18 2.376 1.044 6.3 3.564 9.144 2.485 2.844 6.12 6.372 10.909 7.668 4.824 1.152 13.859 1.368 17.1-0.9 2.916-2.484 3.023-9.216 0.9-13.248-2.197-4.032-8.893-9.324-13.861-10.62-5.039-1.368-13.176 1.26-16.235 2.628-3.12 1.224-2.62 2.952-2.37 5.328z" i:knockout="Off" fill="#000000" /> <path d="m107.16 33.535c0.108 2.304 1.08 5.868 3.347 8.604 2.305 2.664 5.725 6.084 10.26 7.2 4.32 1.008 13.248 1.332 16.094-0.828 2.807-2.304 2.807-8.784 0.828-12.492-2.197-3.816-8.209-8.712-13.033-9.972-4.824-1.188-12.313 1.08-15.264 2.484-3 1.224-2.49 2.664-2.24 5.004z" i:knockout="Off" /> <path d="m125.16 31.735c-6.156 2.52-11.557 4.176-16.632 5.508-5.112 1.224-9.612 1.764-13.644 1.764l1.512 9c7.02-0.036 13.032-0.72 18.035-2.592 5.004-1.836 8.857-4.536 11.846-8.244-0.37-1.8-0.72-3.6-1.12-5.436z" i:knockout="Off" fill="#000000" /> <path d="m124.37 32.743c-2.773 0.972-5.365 2.052-7.92 2.844-2.629 0.792-3.924 1.584-7.381 2.232-3.528 0.648-7.92 1.26-13.464 1.836l0.252 1.44c4.536-0.18 8.784-0.72 12.888-1.62 3.996-1.08 8.675-2.772 11.412-3.816 2.664-1.008 4.213-1.656 4.645-1.944-0.15-0.324-0.29-0.648-0.43-0.972z" i:knockout="Off" /> <path d="m125.23 34.867l0.18 2.376c-3.348 3.024-6.48 5.256-9.828 6.84-3.42 1.548-6.948 1.908-10.007 2.484-3.096 0.54-5.904 0.576-8.424 0.504l-1.044-5.508c4.392 0.18 8.496-0.216 12.6-1.044 4.032-0.936 8.749-3.024 11.52-4.032 2.629-0.972 4.176-1.8 4.5-2.088 0.15 0.144 0.33 0.288 0.51 0.468z" i:knockout="Off" /> <path d="m89.734 62.371c-1.764 0.972-3.312 1.152-5.04 0.54-1.728-0.72-5.184-1.944-5.076-4.248-0.072-2.34 1.476-8.496 5.328-9.576 3.852-1.224 14.508 0.72 17.82 2.916 3.168 2.16 2.772 8.496 1.584 10.116-1.224 1.548-4.14 1.224-8.748-0.828-0.828 1.08-0.972 2.196-0.288 3.744 0.612 1.512 1.944 3.06 3.996 5.04-1.008 1.764-2.34 2.916-4.536 3.456-2.16 0.504-4.86 0.288-8.244-0.504 0.18-2.196 0.54-4.104 1.08-5.868 0.469-1.836 1.224-3.384 2.124-4.788z" i:knockout="Off" fill="#000000" /> <path d="m98.411 70.183c-1.548 0.9-2.988 1.332-4.86 1.44-1.8 0.036-3.852-0.252-6.012-1.008l-0.36 2.088c1.404 0.359 2.628 0.54 3.96 0.685 1.26 0.035 2.484 0.071 3.672-0.181 1.008-0.36 2.304-1.044 2.916-1.512 0.54-0.54 0.863-1.044 0.684-1.512z" i:knockout="Off" /> <path d="m80.482 57.115c-0.36 0.864-0.288 1.692-0.18 2.34 0.072 0.612 0.576 0.9 1.116 1.44 0.576 0.396 1.296 0.864 2.304 1.26 0.9 0.324 1.944 0.648 3.132 0.684 0.972-0.108 2.016-0.468 2.988-1.08l0.18-0.792c-1.368 0.432-2.664 0.684-3.744 0.756-1.152 0.072-2.088-0.252-2.952-0.576-0.9-0.504-1.656-1.152-2.268-2.088-0.18-0.648-0.359-1.296-0.576-1.944z" i:knockout="Off" /> <path d="m95.818 60.895c1.188 0.54 2.232 1.08 3.276 1.332 0.936 0.216 2.088 0.432 2.916 0.36 0.828-0.18 1.368-0.504 1.908-1.116-1.692 0.216-3.096 0.036-4.356-0.144-1.332-0.216-2.232-0.828-3.096-1.44-0.218 0.324-0.433 0.648-0.65 1.008z" i:knockout="Off" /> <path d="m98.086 69.931c-1.08-1.116-1.98-2.16-2.556-3.276-0.72-1.152-1.332-2.34-1.152-3.564 0.072-1.26 0.9-2.556 2.088-3.888 0.396 0.54 1.188 1.044 2.52 1.368s3.024 0.468 5.364 0.576c0.36-0.9 0.576-1.692 0.504-2.916-0.18-1.296 0.18-2.772-1.008-4.032-1.26-1.332-3.168-2.52-6.12-3.276-3.06-0.756-8.568-1.872-11.376-1.26-2.844 0.54-4.068 2.844-4.932 4.392-0.9 1.404-0.396 2.916 0 4.104 0.324 1.116 1.044 1.872 2.16 2.412 1.044 0.432 2.664 0.432 4.032 0.432 1.296-0.144 2.448-0.432 3.6-1.008-0.216 0.288-0.684 1.116-1.26 2.916-0.576 1.692-1.404 4.068-2.34 7.272 1.908 0.648 3.744 1.08 5.508 1.008 1.735-0.108 3.39-0.432 4.974-1.26z" i:knockout="Off" /> <path d="m103.52 116.48c0.18 2.34-0.54 4.032-2.016 5.616-1.656 1.403-4.68 4.355-7.128 3.168-2.52-1.332-8.172-5.868-7.38-10.549 0.864-4.752 8.136-15.084 12.24-17.388 3.888-2.304 10.476 1.368 11.556 3.528 1.043 2.124-0.793 4.896-5.364 8.855 0.648 1.44 1.908 2.053 3.78 2.232 1.909 0.072 4.284-0.468 7.417-1.62 1.404 1.908 1.943 3.96 1.332 6.552-0.648 2.521-2.197 5.292-4.789 8.46-2.23-1.332-4.067-2.664-5.651-4.14-1.62-1.55-2.95-2.99-4-4.72z" i:knockout="Off" fill="#000000" /> <path d="m116.27 111.3c0.182 2.017-0.143 3.853-0.971 5.904-0.9 1.908-2.232 3.852-4.141 5.832l2.016 1.476c1.08-1.26 2.053-2.592 2.773-3.852 0.646-1.476 1.439-2.628 1.691-3.996 0.252-1.404 0.072-2.916-0.107-3.852-0.22-0.9-0.69-1.41-1.26-1.51z" i:knockout="Off" /> <path d="m93.19 123.57c0.828 0.756 1.62 1.224 2.376 1.404 0.684 0.107 1.296-0.181 2.124-0.469 0.72-0.432 1.656-0.972 2.52-1.764 0.828-0.864 1.8-1.908 2.34-2.988 0.504-1.151 0.504-2.376 0.396-3.672l-0.756-0.647c-0.216 1.691-0.54 3.096-1.116 4.355-0.576 1.188-1.296 2.088-2.16 2.844-0.936 0.685-2.052 1.08-3.348 1.332-0.788-0.09-1.58-0.23-2.372-0.38z" i:knockout="Off" /> <path d="m105.11 109.28c1.296-0.972 2.196-1.908 3.096-2.808 0.864-0.973 1.44-1.98 1.872-2.881 0.217-0.936 0.145-1.8-0.215-2.592-0.72 1.8-1.512 3.313-2.376 4.536-0.972 1.188-2.016 1.98-3.132 2.521 0.25 0.39 0.5 0.79 0.76 1.22z" i:knockout="Off" /> <path d="m115.83 111.51c-1.691 0.647-3.348 0.899-4.824 1.044-1.619 0.035-3.059 0.107-4.319-0.612-1.188-0.828-2.34-2.196-3.06-4.248 0.792-0.072 1.764-0.72 2.772-1.944 0.972-1.224 2.088-3.023 3.348-5.399-0.648-0.9-1.584-1.477-2.808-2.017-1.296-0.576-2.952-1.655-4.824-1.008-2.016 0.54-4.32 2.088-6.624 4.788-2.412 2.7-6.336 8.172-7.2 11.412-0.864 3.168 0.972 5.796 2.16 7.488 1.152 1.548 2.88 1.871 4.356 2.088 1.296 0.144 2.556-0.145 3.636-1.008 0.936-0.937 2.016-2.664 2.556-4.068 0.576-1.404 0.792-2.844 0.792-4.32 0.144 0.324 0.9 1.26 2.412 2.809 1.512 1.476 3.636 3.6 6.516 6.228 1.691-1.728 2.988-3.456 3.889-5.328 0.87-1.94 1.22-3.77 1.22-5.9z" i:knockout="Off" /> <path d="m177.25 99.596c2.305 0.792 3.961 2.016 4.824 4.212 0.828 2.088 2.592 6.228 0.432 8.243-2.303 1.944-8.928 5.832-13.355 3.349-4.428-2.628-11.771-14.04-12.6-18.828-0.756-4.932 5.291-9.937 7.883-10.152 2.412-0.18 4.682 2.557 6.805 8.748 1.584-0.18 2.844-1.116 3.637-2.952 0.828-1.943 1.188-4.428 1.223-7.991 2.449-0.757 4.752-0.36 7.057 1.188 2.34 1.512 4.355 4.176 6.588 7.992-2.16 1.728-4.211 2.952-6.299 4.068-2.11 1.078-4.13 1.654-6.18 2.123z" i:knockout="Off" fill="#000000" /> <path d="m176.96 84.943c2.088 0.504 3.779 1.584 5.471 3.24 1.621 1.548 2.988 3.672 4.248 6.372l2.232-1.44c-0.863-1.656-1.799-3.024-2.807-4.248-1.01-1.26-2.16-2.52-3.313-3.204-1.26-0.792-2.916-1.296-3.852-1.368-1.01-0.144-1.62 0.072-1.98 0.648z" i:knockout="Off" /> <path d="m180.35 112.63c1.01-0.576 1.908-1.188 2.305-1.836 0.359-0.72 0.432-1.439 0.359-2.304-0.107-0.972-0.322-2.124-0.791-3.168-0.432-1.188-1.26-2.628-2.088-3.492-0.936-0.9-2.16-1.548-3.527-1.8l-0.9 0.54c1.584 0.792 2.879 1.764 3.887 2.771 0.938 1.009 1.656 1.944 2.018 3.204 0.252 1.152 0.395 2.448 0.035 3.889-0.45 0.72-0.88 1.44-1.31 2.2z" i:knockout="Off" /> <path d="m170.66 95.312c-0.467-1.584-1.008-3.024-1.619-4.177-0.613-1.296-1.369-2.34-2.125-2.987-0.791-0.648-1.727-0.9-2.664-0.756 1.512 1.332 2.809 2.699 3.602 4.104 0.756 1.332 1.295 2.7 1.332 4.104 0.46-0.073 0.97-0.181 1.47-0.288z" i:knockout="Off" /> <path d="m177 85.483c-0.072 1.979-0.287 3.528-0.791 5.184-0.576 1.513-1.008 3.061-2.268 4.068-1.297 0.828-3.098 1.439-5.4 1.439 0.215-0.899-0.072-2.016-0.865-3.491-0.863-1.513-2.23-3.313-4.104-5.4-1.152 0.216-2.088 0.936-3.096 2.016-1.115 1.009-2.664 2.196-2.844 4.393-0.18 2.231 0.432 4.896 2.232 8.424 1.871 3.348 5.615 9.324 8.604 11.52 2.844 2.017 6.156 1.152 8.279 0.721 1.945-0.54 3.025-2.269 3.781-3.528 0.684-1.368 0.756-2.664 0.359-4.032-0.504-1.439-1.943-2.987-3.061-4.067-1.152-1.152-2.592-1.872-4.031-2.448 0.359-0.036 1.656-0.432 3.744-1.332 2.051-1.008 4.895-2.232 8.676-4.104-1.008-2.411-2.268-4.319-3.781-5.867-1.55-1.622-3.32-2.738-5.44-3.494z" i:knockout="Off"/>`;
         case 'trash':
@@ -1157,6 +1323,8 @@ export function svgIcons(icon){
         //    return `<path d="m17.177 23.931c-1.026 0.841 7.226 11.285 7.735 11.893 7.05 8.436 14.029 8.726 14.892 9.985 0.87 1.251 5.028 5.437 12.424 6.668 0.028 1.923 0.134 3.74 0.332 5.466-4.546-1.252-9.666-2.327-12.53-2.32-3.019-0.007-13.244 2.85-15.075 3.706-0.644 0.304-12.325 0.007-12.325 1.279 0 1.287 11.632 1.761 12.113 1.111 4.221 0.671 16.178-1.514 17.451-1.287 1.273 0.24 11.066 3.09 11.137 3.104 0.735 3.38 1.803 5.225 3.069 7.481-4.865-0.141-13.598 4.674-18.47 9.546-4.044 4.045-10.783 10.585-11.801 12.028-3.805 5.374-2.101 22.179 0.007 22.179 1.654 0-2.306-15.044 1.499-20.418 1.096-1.549 13.35-9.914 14.778-11.555 1.429-1.64 9.023-3.988 12.205-6.364-3.203 2.072-5.395 5.311-5.395 9.766 0 16.541 8.633 23.211 15.118 23.291 0 0 0.007 0.02 0.021 0.02h0.127c6.477-0.08 15.069-6.77 15.069-23.283 0.007-4.151-1.91-7.269-4.752-9.348 3.458 2.213 10.239 4.384 11.582 5.926 1.436 1.633 13.632 9.998 14.732 11.554 3.82 5.367-0.14 20.431 1.53 20.431 2.09 0 3.81-16.811 0-22.185-1.02-1.435-7.755-7.969-11.8-12.014-4.879-4.879-13.598-9.694-18.47-9.546 1.266-2.255 2.327-4.15 3.069-7.537 0.064-0.008 9.857-2.815 11.137-3.048s13.23 1.959 17.454 1.28c0.48 0.657 12.12 0.177 12.11-1.103 0.01-1.28-11.71-1.004-12.35-1.308-1.83-0.863-12.002-3.713-15.029-3.713-2.864 0.007-8.025 1.082-12.572 2.32 0.198-1.712 0.346-3.529 0.375-5.452 7.396-1.245 11.561-5.424 12.416-6.675 0.87-1.252 7.849-1.542 14.9-9.992 0.5-0.601 8.76-11.052 7.73-11.886-1.21-0.983-8.78 8.761-9.08 9.616-2.05 1.019-11.796 7.51-12.97 7.977-1.181 0.459-7.12 2.581-13.435 6.364-0.969-3.699-3.408-6.209-6.392-7.538 4.122-0.007 7.121-0.813 7.121-5.353 0-4.964-0.955-9.539-2.56-13.209 4.391-2.284 7.573-4.73 8.527-5.077 0.955-0.36 1.323-1.676-0.487-4.999-2.984-5.4589-6.216-10.189-6.916-9.9278-0.7 0.2758 2.567 10.911 5.367 13.202-3.316 0.587-5.494 1.662-8.259 3.578-2.178-3.295-4.978-5.275-8.068-5.325-0.007-0.007-0.014-0.028-0.021-0.021-0.029 0-0.064-0.007-0.092-0.007-3.097 0.042-5.954 2.051-8.125 5.353-2.772-1.909-4.935-3.012-8.245-3.606 2.8-2.277 6.088-12.905 5.388-13.167-0.7-0.2614-3.952 4.4338-6.936 9.893-1.818 3.33-1.422 4.674-0.467 5.02 0.962 0.354 4.144 2.8 8.535 5.084-1.612 3.663-2.567 8.252-2.567 13.216 0 4.526 2.998 5.346 7.113 5.346-2.976 1.336-5.416 3.846-6.385 7.531-6.314-3.784-12.282-5.877-13.456-6.343-1.181-0.46-10.918-7.001-12.968-8.019-0.297-0.848-7.849-10.578-9.065-9.588z"/>`;
         case 'turtle':
             return `<path style="stroke:#000000;stroke-width:0.09375" d="m 116.14,18.675268 c 5.28,-0.32 10.73,-1.18 16,-0.09 1.71,0.51 3.5,0.69 5.3,0.64 0.66,0.08 1.99,0.24 2.65,0.32 0.98,0.67 2.07,0.89 3.26,0.67 l 0.84,0.14 c 0.53,0.21 1.6,0.63 2.13,0.84 l 0.82,-0.07 0.82,0.24 c 0.57,0.2 1.7,0.6 2.27,0.8 l 0.82,0.3 c 0.57,0.22 1.69,0.67 2.26,0.89 0.55,0.24 1.64,0.73 2.19,0.98 l 0.74,0.33 c 0.34,0.16 1.02,0.49 1.36,0.65 l 0.68,0.34 c 0.31,0.17 0.95,0.51 1.26,0.68 l 0.64,0.35 c 0.29,0.18 0.87,0.53 1.17,0.71 0.26,0.19 0.78,0.58 1.04,0.78 l 0.63,0.28 c 0.28,0.2 0.85,0.6 1.13,0.8 0.29,0.21 0.88,0.63 1.17,0.84 l 0.62,0.45 c 0.29,0.22 0.87,0.66 1.16,0.88 0.27,0.21 0.83,0.65 1.11,0.87 0.27,0.22 0.82,0.65 1.09,0.87 0.25,0.23 0.74,0.7 0.99,0.93 l 0.62,0.36 c 0.26,0.24 0.79,0.71 1.06,0.95 0.26,0.24 0.77,0.74 1.03,0.99 0.24,0.25 0.74,0.77 0.99,1.02 0.24,0.27 0.72,0.8 0.96,1.07 l 0.38,0.61 c 0.24,0.25 0.72,0.74 0.96,0.99 0.23,0.26 0.69,0.8 0.92,1.06 0.23,0.27 0.71,0.8 0.94,1.06 0.24,0.26 0.72,0.79 0.96,1.05 0.24,0.27 0.72,0.8 0.96,1.06 0.24,0.27 0.71,0.8 0.95,1.07 0.24,0.27 0.7,0.81 0.94,1.08 l 0.37,0.62 c 0.23,0.24 0.71,0.73 0.94,0.98 0.23,0.26 0.68,0.79 0.91,1.05 0.23,0.26 0.69,0.78 0.92,1.04 0.23,0.26 0.7,0.78 0.94,1.04 0.23,0.26 0.7,0.79 0.93,1.05 0.24,0.27 0.71,0.8 0.95,1.07 0.23,0.28 0.71,0.84 0.95,1.13 l 0.49,0.6 c 0.23,0.28 0.71,0.84 0.94,1.13 0.24,0.26 0.72,0.8 0.96,1.07 0.24,0.25 0.72,0.77 0.97,1.02 0.24,0.25 0.74,0.75 0.98,1 0.26,0.24 0.77,0.72 1.02,0.96 0.26,0.23 0.78,0.69 1.04,0.92 0.27,0.22 0.8,0.66 1.07,0.88 0.25,0.21 0.77,0.64 1.02,0.86 l 0.63,0.32 c 0.28,0.19 0.86,0.56 1.14,0.75 0.28,0.19 0.83,0.56 1.1,0.75 l 0.65,0.25 c 0.29,0.18 0.88,0.54 1.17,0.72 l 0.72,0.21 0.72,0.32 c 0.36,0.15 1.07,0.47 1.43,0.62 l 0.79,0.32 c 0.57,0.23 1.72,0.69 2.29,0.92 l 0.82,0.3 c 0.53,0.28 1.58,0.86 2.1,1.15 l 0.62,0.55 c 0,0.39 0.01,1.16 0.01,1.54 l -0.01,0.7 c -0.14,0.27 -0.42,0.81 -0.56,1.09 -0.13,0.24 -0.38,0.72 -0.5,0.96 l -0.19,0.5 c -0.1,0.23 -0.28,0.69 -0.38,0.92 -0.08,0.22 -0.24,0.66 -0.32,0.89 l -0.14,0.47 -0.16,0.48 c 0.2,-0.11 0.61,-0.34 0.81,-0.45 l 0.55,-0.03 c 0.3,-0.03 0.92,-0.1 1.22,-0.14 l 0.72,-0.12 c 0.52,-0.22 1.56,-0.66 2.09,-0.88 l 0.73,-0.2 c 0.31,-0.18 0.91,-0.55 1.21,-0.73 l 0.69,-0.21 c 0.3,-0.18 0.9,-0.54 1.2,-0.72 l 0.69,-0.22 c 0.3,-0.18 0.9,-0.55 1.2,-0.73 l 0.71,-0.22 c 0.3,-0.19 0.9,-0.55 1.21,-0.73 l 0.7,-0.23 c 0.3,-0.18 0.9,-0.54 1.2,-0.72 l 0.69,-0.23 c 0.3,-0.17 0.89,-0.53 1.19,-0.71 l 0.68,-0.2 c 0.29,-0.18 0.87,-0.53 1.16,-0.7 l 0.7,-0.18 c 0.29,-0.19 0.88,-0.55 1.18,-0.74 0.54,-0.23 1.61,-0.71 2.14,-0.94 l 0.76,-0.34 c 0.35,-0.15 1.07,-0.47 1.42,-0.62 l 0.77,-0.32 c 0.56,-0.2 1.69,-0.62 2.25,-0.83 l 0.82,-0.27 c 0.58,-0.18 1.74,-0.55 2.32,-0.74 0.44,-0.1 1.31,-0.3 1.75,-0.4 0.61,-0.15 1.84,-0.45 2.45,-0.61 0.73,-0.09 2.18,-0.27 2.91,-0.36 1.62,0.07 3.26,0.15 4.9,0.19 l 0.93,0.11 0.89,0.32 c 0.63,0.18 1.88,0.55 2.5,0.74 0.2,0.22 0.61,0.66 0.81,0.87 l 0.61,0.29 c 0.29,0.18 0.85,0.55 1.14,0.73 0.28,0.2 0.85,0.6 1.13,0.8 l 0.59,0.44 c 0.27,0.22 0.8,0.67 1.07,0.89 0.24,0.24 0.74,0.7 0.98,0.94 0.23,0.25 0.68,0.75 0.9,1 0.21,0.27 0.62,0.82 0.83,1.09 l 0.2,0.68 c 0.19,0.3 0.58,0.9 0.77,1.2 l 0.13,0.81 c 0.04,1.24 0.12,2.49 0.22,3.75 l -0.09,0.96 -0.27,0.95 c -0.2,0.66 -0.6,1.99 -0.8,2.65 -0.22,0.21 -0.66,0.62 -0.88,0.83 l -0.3,0.59 c -0.19,0.26 -0.57,0.78 -0.77,1.04 -0.21,0.24 -0.62,0.73 -0.83,0.97 -0.22,0.22 -0.67,0.67 -0.89,0.9 -0.24,0.21 -0.72,0.64 -0.95,0.85 -0.27,0.2 -0.8,0.61 -1.06,0.82 l -0.59,0.4 c -0.31,0.2 -0.92,0.59 -1.23,0.78 -0.53,0.24 -1.61,0.73 -2.15,0.97 -0.42,0.14 -1.26,0.41 -1.68,0.55 -0.59,0.18 -1.76,0.54 -2.34,0.73 l -0.83,0.25 c -0.57,0.19 -1.7,0.57 -2.27,0.76 l -0.81,0.25 c -0.57,0.17 -1.7,0.53 -2.27,0.7 -0.42,0.1 -1.26,0.29 -1.68,0.39 -0.56,0.17 -1.69,0.51 -2.26,0.69 l -0.82,0.23 c -0.57,0.17 -1.71,0.53 -2.27,0.7 -0.43,0.1 -1.27,0.29 -1.7,0.39 -0.57,0.18 -1.71,0.53 -2.29,0.71 l -0.82,0.24 c -0.56,0.19 -1.69,0.57 -2.25,0.76 l -0.81,0.23 -0.83,-0.05 c -0.53,0.21 -1.59,0.65 -2.12,0.87 l -0.83,0.19 c -0.57,0.18 -1.72,0.54 -2.29,0.73 l -0.82,0.250002 c -0.57,0.19 -1.7,0.58 -2.27,0.77 l -0.81,0.23 -0.83,-0.05 c -0.53,0.21 -1.58,0.65 -2.11,0.87 l -0.83,0.18 c -0.57,0.18 -1.69,0.54 -2.26,0.72 l -0.81,0.24 c -0.56,0.19 -1.67,0.57 -2.22,0.76 l -0.81,0.25 c -0.52,0.23 -1.58,0.67 -2.1,0.9 -0.53,0.2 -1.59,0.59 -2.12,0.79 l -0.77,0.25 c -0.54,0.13 -1.6,0.4 -2.14,0.53 l -0.62,0.4 0.17,0.54 c 0.23,0.76 0.46,1.52 0.7,2.29 l 0.19,0.61 c 0.42,-0.01 1.26,-0.03 1.68,-0.04 l 0.85,0 c 0.55,0.17 1.65,0.52 2.21,0.7 l 0.8,0.25 c 0.55,0.19 1.65,0.56 2.21,0.75 l 0.8,0.25 c 0.57,0.18 1.7,0.54 2.26,0.71 l 0.83,0.2 c 0.53,0.21 1.61,0.63 2.14,0.84 l 0.83,-0.07 0.83,0.2 c 0.96,0.75 2.04,1.01 3.25,0.79 l 0.88,-0.04 c 0.68,0.11 2.03,0.32 2.71,0.43 0.6,0.15 1.81,0.45 2.42,0.59 0.42,0.1 1.27,0.3 1.69,0.4 0.54,0.2 1.61,0.59 2.15,0.79 l 0.68,0.32 c 0.33,0.09 0.99,0.25 1.31,0.34 l 0.71,-0.02 c -0.2,0.55 -0.58,1.64 -0.78,2.19 -0.45,1.29 -1.09,2.52 -1.69,3.76 -1.54,0 -2.88,0.8 -4.06,1.7 -0.25,0.2 -0.75,0.61 -1,0.82 l -0.48,0.43 c -0.25,0.21 -0.75,0.61 -1,0.81 -1.23,0.36 -2.39,0.94 -3.3,1.85 -0.36,0.4 -1.1,1.21 -1.47,1.62 l -0.5,0.5 c -0.28,0.18 -0.83,0.52 -1.1,0.69 l -0.63,0.02 -0.63,-0.04 c -0.27,-0.14 -0.81,-0.41 -1.08,-0.55 -0.26,-0.16 -0.78,-0.49 -1.04,-0.66 -0.28,-0.18 -0.83,-0.54 -1.1,-0.72 l -0.59,-0.4 c -0.29,-0.2 -0.87,-0.6 -1.16,-0.79 -0.3,-0.2 -0.89,-0.59 -1.19,-0.79 l -0.63,-0.4 c -0.3,-0.19 -0.9,-0.57 -1.2,-0.76 -0.28,-0.21 -0.82,-0.61 -1.09,-0.82 l -0.67,-0.27 c -0.31,-0.19 -0.93,-0.58 -1.24,-0.77 l -0.65,-0.41 c -0.31,-0.2 -0.93,-0.6 -1.23,-0.8 -0.31,-0.21 -0.93,-0.61 -1.24,-0.81 l -0.64,-0.42 c -0.31,-0.21 -0.91,-0.62 -1.22,-0.83 -0.3,-0.21 -0.9,-0.62 -1.2,-0.82 l -0.63,-0.43 c -0.29,-0.2 -0.87,-0.62 -1.16,-0.82 -0.28,-0.2 -0.83,-0.6 -1.11,-0.8 -0.26,-0.21 -0.77,-0.63 -1.03,-0.84 l -0.62,-0.31 c -0.29,-0.2 -0.86,-0.6 -1.14,-0.81 -0.3,-0.2 -0.89,-0.6 -1.18,-0.81 l -0.63,-0.41 c -0.3,-0.2 -0.9,-0.6 -1.2,-0.8 -0.31,-0.19 -0.92,-0.56 -1.22,-0.75 l -0.64,-0.36 c -0.31,-0.17 -0.92,-0.51 -1.23,-0.68 -0.29,-0.15 -0.88,-0.46 -1.18,-0.62 l -0.72,-0.14 -0.74,-0.2 c -0.58,-1.39 -1.32,-1.5 -2.22,-0.32 -0.66,0.02 -1.99,0.07 -2.66,0.09 -1.79,-0.26 -3.55,0.52 -4.44,2.13 l -0.54,0.65 c -0.15,0.57 -0.44,1.71 -0.58,2.27 l -0.2,0.84 c -0.18,0.57 -0.55,1.72 -0.73,2.3 l -0.24,0.85 c -0.15,0.63 -0.46,1.89 -0.61,2.52 0.08,0.49 0.22,1.49 0.3,1.98 l -0.52,-0.35 c 0.08,0.3 0.24,0.91 0.32,1.21 0.15,0.32 0.45,0.96 0.6,1.28 0.17,0.29 0.5,0.86 0.67,1.15 0.21,0.25 0.63,0.75 0.84,1 0.24,0.22 0.72,0.67 0.97,0.89 l 0.52,0.44 c 0.24,0.21 0.73,0.64 0.98,0.85 0.22,0.22 0.65,0.67 0.86,0.89 l 0.53,0.38 c 0.2,0.26 0.59,0.8 0.78,1.07 0.09,0.34 0.25,1.02 0.34,1.36 0,0.31 0.01,0.94 0.02,1.25 l 0.39,-0.45 c -0.2,0.56 -0.61,1.66 -0.81,2.22 -0.07,0.32 -0.2,0.96 -0.27,1.28 l 0.49,-0.42 -0.67,0.52 c -0.32,0.48 -0.97,1.43 -1.3,1.91 l -0.17,0.79 c -0.03,0.4 -0.09,1.2 -0.11,1.61 -0.46,0.06 -1.37,0.18 -1.83,0.25 -1.52,0.03 -3,0.37 -4.37,0.98 -0.7,0.1 -2.11,0.28 -2.81,0.38 l -0.94,0.04 c -1.75,-0.01 -5.24,-0.03 -6.98,-0.04 -0.73,-0.11 -2.19,-0.33 -2.91,-0.44 -1,-0.7 -2.09,-0.99 -3.29,-0.87 l -0.73,-0.27 c -0.31,-0.14 -0.95,-0.43 -1.27,-0.58 l -0.61,-0.31 c -0.28,-0.18 -0.83,-0.53 -1.11,-0.71 l -0.53,-0.41 c -0.23,-0.25 -0.69,-0.74 -0.92,-0.99 l -0.39,-0.6 c -0.16,-0.34 -0.49,-1.01 -0.65,-1.35 l -0.24,-0.81 c -0.06,-0.69 -0.18,-2.07 -0.25,-2.75 0.07,-0.71 0.19,-2.13 0.25,-2.83 0.17,-0.36 0.5,-1.08 0.67,-1.43 -0.01,-0.43 -0.01,-1.28 -0.02,-1.71 l 0.18,-0.82 c 0.18,-0.34 0.54,-1 0.73,-1.34 0.02,-0.42 0.07,-1.27 0.09,-1.7 l 0.23,-0.85 c 0.17,-0.58 0.53,-1.75 0.7,-2.33 l 0.19,-0.8 c 0.2,-0.31 0.61,-0.91 0.82,-1.21 0.05,-0.41 0.15,-1.23 0.2,-1.65 l 0.36,-0.77 c 0.14,-0.4 0.42,-1.21 0.56,-1.61 l -0.78,-0.26 c -2.71,-0.95 -5.39,-1.57 -8.1,-2.36 -0.38,0.05 -1.15,0.14 -1.53,0.19 -3.58,-0.27 -7.09,-0.38 -10.65,-0.39 -6.39,-0.14 -12.77,0.3 -19.13,-0.1 -0.54,0.18 -1.61,0.52 -2.15,0.69 -0.36,0.09 -1.08,0.27 -1.44,0.36 -0.3,0.1 -0.89,0.3 -1.19,0.4 l 0.71,0.26 c -1.46,-0.04 -1.69,0.56 -0.71,1.8 l 0.07,0.82 c 0,0.4 0,1.21 0,1.61 0.16,0.33 0.47,0.98 0.63,1.31 l 0.14,0.79 c 0.06,0.61 0.17,1.82 0.22,2.43 0.17,0.32 0.5,0.97 0.67,1.29 l 0.24,0.77 c 0.27,0.51 0.8,1.53 1.07,2.04 0.49,0.31 1.48,0.93 1.98,1.23 0.42,0.11 1.25,0.32 1.67,0.42 1.31,0.63 2.73,1 4.19,1.09 0.45,0.07 1.34,0.21 1.79,0.29 0.02,0.43 0.05,1.29 0.07,1.71 l 0.11,0.87 c 0.05,0.43 0.14,1.31 0.19,1.75 l -0.19,0.89 c -0.04,0.44 -0.12,1.33 -0.16,1.77 -1.16,-0.14 -2.02,0.34 -2.57,1.45 -0.43,0.36 -1.3,1.07 -1.73,1.42 -0.12,0.39 -0.35,1.16 -0.47,1.55 l -0.87,-0.12 c -1.23,-0.3 -2.33,-0.04 -3.3,0.79 -1.69,-0.03 -5.06,-0.09 -6.74,-0.13 -1.78,-0.4 -3.59,-0.63 -5.4,-0.61 l -0.87,-0.04 c -0.42,-0.08 -1.28,-0.25 -1.71,-0.34 -0.56,-0.17 -1.67,-0.51 -2.23,-0.68 l -0.7,-0.26 c -0.26,-0.18 -0.79,-0.55 -1.05,-0.73 l -0.63,-0.19 c -0.25,-0.23 -0.74,-0.68 -0.99,-0.9 -0.31,-0.44 -0.94,-1.33 -1.25,-1.77 -0.22,-0.55 -0.65,-1.63 -0.87,-2.17 -0.11,-0.42 -0.34,-1.26 -0.46,-1.67 -0.15,-0.59 -0.47,-1.76 -0.62,-2.35 -0.08,-0.43 -0.24,-1.29 -0.32,-1.72 0.24,-1.21 0,-2.31 -0.7,-3.29 -0.07,-0.43 -0.23,-1.3 -0.3,-1.73 0.24,-1.21 0.01,-2.32 -0.68,-3.31 -0.09,-0.67 -0.27,-1.99 -0.36,-2.65 0.28,-1.2 0.08,-2.3 -0.6,-3.29 -0.12,-0.42 -0.36,-1.25 -0.47,-1.66 -0.4,-0.41 -1.19,-1.21 -1.58,-1.62 -1.12,-0.22 -2.23,-0.48 -3.31,-0.79 -1.11,-0.93 -2.62,-0.28 -2.98,1.03 -0.23,0.22 -0.69,0.65 -0.92,0.86 l -0.33,0.58 c -0.19,0.29 -0.57,0.85 -0.76,1.13 l -0.39,0.59 c -0.19,0.29 -0.57,0.86 -0.75,1.15 -0.2,0.26 -0.6,0.79 -0.8,1.06 l -0.28,0.63 c -0.19,0.28 -0.58,0.86 -0.77,1.14 -0.21,0.27 -0.63,0.8 -0.84,1.06 l -0.32,0.65 c -0.21,0.3 -0.63,0.88 -0.85,1.17 -0.22,0.3 -0.66,0.9 -0.88,1.2 l -0.47,0.62 c -0.23,0.29 -0.7,0.87 -0.93,1.16 -0.24,0.27 -0.71,0.81 -0.95,1.08 -0.24,0.25 -0.72,0.77 -0.96,1.02 -0.25,0.25 -0.75,0.75 -1,0.99 -0.25,0.24 -0.76,0.71 -1.02,0.95 -0.26,0.23 -0.79,0.68 -1.06,0.91 -0.28,0.21 -0.84,0.64 -1.11,0.85 l -0.65,0.28 c -0.28,0.2 -0.82,0.59 -1.1,0.79 l -0.67,0.19 c -0.3,0.16 -0.89,0.49 -1.19,0.65 l -0.67,0.25 c -0.34,0.09 -1.01,0.29 -1.34,0.38 l -0.7,0.06 c -0.32,-0.08 -0.97,-0.23 -1.29,-0.31 l -0.73,0.01 c -0.36,-0.13 -1.07,-0.37 -1.43,-0.5 -0.32,-0.17 -0.95,-0.53 -1.26,-0.71 l -0.6,-0.43 c -0.24,-0.26 -0.73,-0.77 -0.97,-1.03 -0.36,-0.12 -1.1,-0.36 -1.47,-0.49 -0.04,-1.19 -0.55,-2.15 -1.52,-2.86 -0.17,-0.37 -0.49,-1.11 -0.65,-1.47 l -0.35,-0.82 c -0.02,-3.04 -0.02,-5.92 0.08,-8.89 l 0.13,-0.88 0.25,-0.81 c 0.17,-0.3 0.51,-0.91 0.68,-1.21 l 0.13,-0.68 c 0.19,-0.25 0.57,-0.76 0.76,-1.01 l 0.26,-0.59 c 0.22,-0.24 0.65,-0.72 0.86,-0.96 0.26,-0.21 0.78,-0.65 1.03,-0.86 l 0.61,-0.41 c 0.32,-0.19 0.97,-0.57 1.29,-0.75 l 0.74,-0.36 c 0.57,-0.25 1.71,-0.73 2.28,-0.98 l 0.81,-0.34 c 0.52,-0.29 1.57,-0.86 2.09,-1.14 l 0.6,-0.46 c 0.23,-0.21 0.69,-0.65 0.92,-0.86 l 0.29,-0.54 c 0.12,-0.25 0.37,-0.76 0.49,-1.01 l 0.15,-0.55 c 0.09,-0.25 0.25,-0.74 0.33,-0.99 -0.16,-0.21 -0.49,-0.62 -0.66,-0.83 -0.4,-0.33 -1.2,-1.000002 -1.6,-1.330002 l -0.66,-0.34 c -0.28,-0.17 -0.85,-0.51 -1.14,-0.68 l -0.7,-0.15 -0.67,-0.29 c -0.33,-0.14 -0.98,-0.43 -1.31,-0.57 l -0.67,-0.3 c -0.34,-0.15 -1,-0.44 -1.34,-0.59 l -0.71,-0.3 c -0.36,-0.14 -1.09,-0.42 -1.45,-0.56 -0.42,-0.14 -1.25,-0.41 -1.67,-0.54 -1.07,-0.7 -2.23,-0.98 -3.48,-0.83 -0.44,-0.08 -1.33,-0.23 -1.77,-0.31 -0.36,-0.16 -1.07,-0.48 -1.43,-0.64 -0.65,-0.04 -1.94,-0.11 -2.59,-0.15 l -0.84,-0.16 c -0.34,-0.17 -1.03,-0.51 -1.38,-0.68 -0.42,-0.02 -1.27,-0.05 -1.7,-0.06 l -0.83,-0.19 c -0.34,-0.18 -1.03,-0.55 -1.37,-0.74 -0.44,-0.03 -1.33,-0.09 -1.77,-0.11 l -0.88,-0.26 c -0.6,-0.19 -1.82,-0.58 -2.43,-0.78 l -0.8,-0.26 c -0.32,-0.17 -0.97,-0.51 -1.29,-0.68 l -0.76,-0.1 -0.7,-0.3 c -0.33,-0.16 -0.99,-0.47 -1.31,-0.63 l -0.65,-0.32 c -0.29,-0.16 -0.88,-0.49 -1.18,-0.66 l -0.57,-0.32 c -0.24,-0.18 -0.73,-0.52 -0.98,-0.69 -0.21,-0.18 -0.64,-0.54 -0.85,-0.72 -0.2,-0.21 -0.6,-0.63 -0.8,-0.83 l -0.01,-0.64 0.39,-0.57 0.69,0.24 c 0.55,0.12 1.65,0.37 2.19,0.5 l 0.82,0.18 c 0.54,0.2 1.62,0.61 2.16,0.82 l 0.83,-0.06 0.83,0.18 c 0.55,0.22 1.65,0.65 2.2,0.87 l 0.85,-0.05 0.85,0.23 c 1.03,0.7 2.18,0.97 3.43,0.8 0.69,0.12 2.06,0.35 2.75,0.47 1.27,0.5 2.68,1.04 4.06,0.59 l 0.74,-0.14 c 0.91,-0.41 2.71,-0.11 2.88,-1.4 -0.06,-0.25 -0.19,-0.76 -0.26,-1.01 -0.22,-0.18 -0.68,-0.55 -0.91,-0.73 l -0.49,-0.32 c -0.23,-0.16 -0.69,-0.49 -0.92,-0.65 -0.21,-0.16 -0.63,-0.5 -0.84,-0.67 l -0.45,-0.32 c -0.17,-0.21 -0.53,-0.62 -0.7,-0.82 -0.12,-0.25 -0.35,-0.74 -0.46,-0.99 l 0.01,-0.56 0.33,-0.46 c 0.16,-0.23 0.46,-0.7 0.61,-0.93 l 0.45,-0.38 c 0.2,-0.23 0.58,-0.7 0.78,-0.93 0.21,-0.27 0.64,-0.82 0.85,-1.09 l 0.47,-0.63 c 0.31,-0.49 0.94,-1.47 1.25,-1.96 0.22,-0.27 0.67,-0.82 0.89,-1.09 l 0.28,-0.66 c 0.21,-0.28 0.63,-0.82 0.84,-1.1 0.22,-0.26 0.64,-0.79 0.86,-1.05 0.22,-0.26 0.65,-0.78 0.87,-1.04 0.22,-0.27 0.66,-0.81 0.88,-1.08 0.22,-0.29 0.65,-0.86 0.87,-1.15 l 0.45,-0.63 c 0.22,-0.3 0.65,-0.9 0.86,-1.21 0.21,-0.31 0.63,-0.93 0.84,-1.24 l 0.42,-0.65 c 0.2,-0.31 0.6,-0.92 0.8,-1.23 0.22,-0.27 0.64,-0.82 0.85,-1.09 l 0.29,-0.67 c 0.19,-0.29 0.59,-0.89 0.78,-1.18 0.21,-0.27 0.64,-0.82 0.85,-1.09 l 0.3,-0.66 c 0.2,-0.3 0.6,-0.9 0.8,-1.2 0.22,-0.27 0.65,-0.82 0.87,-1.1 l 0.31,-0.67 c 0.2,-0.3 0.61,-0.9 0.81,-1.2 0.22,-0.28 0.66,-0.83 0.87,-1.1 l 0.32,-0.67 c 0.2,-0.3 0.62,-0.9 0.82,-1.19 0.23,-0.27 0.67,-0.81 0.9,-1.08 l 0.32,-0.66 c 0.22,-0.29 0.65,-0.87 0.87,-1.16 0.21,-0.29 0.64,-0.86 0.86,-1.14 0.22,-0.26 0.68,-0.77 0.91,-1.03 l 0.35,-0.63 c 0.22,-0.28 0.67,-0.84 0.89,-1.11 0.23,-0.28 0.69,-0.83 0.91,-1.1 0.23,-0.28 0.69,-0.83 0.92,-1.11 0.23,-0.29 0.7,-0.86 0.93,-1.14 l 0.48,-0.61 c 0.24,-0.27 0.71,-0.83 0.94,-1.11 0.24,-0.26 0.71,-0.79 0.94,-1.05 0.24,-0.25 0.71,-0.75 0.95,-1 0.24,-0.25 0.73,-0.73 0.97,-0.97 0.25,-0.24 0.75,-0.71 1,-0.94 0.25,-0.24 0.77,-0.7 1.03,-0.93 0.28,-0.23 0.82,-0.69 1.1,-0.92 l 0.58,-0.47 c 0.28,-0.22 0.84,-0.67 1.12,-0.89 0.27,-0.22 0.81,-0.65 1.08,-0.87 0.27,-0.22 0.82,-0.65 1.09,-0.87 0.28,-0.21 0.85,-0.64 1.13,-0.85 l 0.61,-0.43 c 0.29,-0.2 0.88,-0.61 1.18,-0.82 0.3,-0.19 0.9,-0.58 1.2,-0.77 l 0.63,-0.38 c 0.3,-0.17 0.91,-0.51 1.22,-0.68 l 0.63,-0.26 c 0.21,-0.22 0.63,-0.66 0.84,-0.87 0.61,-0.19 1.82,-0.56 2.42,-0.75 l 0.84,-0.37 c 0.57,-0.24 1.73,-0.71 2.31,-0.94 0.41,-0.04 1.24,-0.11 1.66,-0.15 0.31,-0.2 0.93,-0.6 1.24,-0.8 l 0.81,-0.2 c 0.6,-0.16 1.8,-0.48 2.4,-0.64 0.45,-0.08 1.36,-0.25 1.81,-0.34 1.19,0 2.39,-0.04 3.59,-0.11 l 0.82,0.17 0.38,-0.76 c 1.2,-0.18 2.41,-0.29 3.64,-0.33 2.49,-0.05 4.98,-0.21 7.47,-0.48 z"/>`;
+        case 'candycorn':
+            return `<g stroke-linejoin="round" fill-rule="evenodd" stroke-linecap="round" transform="translate(212.29 -.79375)"><g stroke-width="1.977" transform="translate(-212.29 .79083)"><path d="m8.7744 299.92h305.67c-11.7-40.924-32.198-82.979-45.323-120.19-6.8504-19.422-12.687-43.17-19.199-66.934h-169.63c-6.616 20.75-12.729 41.19-19.492 58.14-15.931 39.94-40.082 85.16-52.024 128.98z" stroke="#f37100" fill="#f37100"/><path d="m8.7744 299.92c-9.7509 35.777-11.392 70.622 6.4747 100.85 25.785 43.628 94.283 44.105 144.96 46.178 50.196 2.0538 118.85 7.808 146.86-33.853 21.965-32.667 19.047-72.359 7.3767-113.18h-305.67z" stroke="#f3f320" fill="#f3f320"/><path d="m80.286 112.83h169.63c-15.09-55.073-34.36-110.14-82.11-111.25-48.56-1.125-69.945 56.085-87.524 111.25z" stroke="#e3e3e3" fill="#e3e3e3"/></g><path opacity=".5" d="m-44.468 2.3473c68.363 1.5855 78.576 113.78 101.3 178.21 26.217 74.328 81.944 167.94 37.957 233.36-28.012 41.661-96.66 35.903-146.86 33.849-50.674-2.0733-119.18-2.5401-144.96-46.168-39.748-67.252 16.617-157.28 45.556-229.84 24.742-62.03 40.181-170.96 107-169.41z" stroke="#aaa" stroke-width="3.0908"/></g>`;
     }
 }
 
@@ -1172,12 +1340,14 @@ export function svgViewBox(icon){
             return `0 0 240 240`;
         case 'micro':
             return `0 0 276 276`;
+        case 'magic':
+            return `0 0 2666 2666`;
         case 'heart':
             return `0 0 20 16`;
         case 'clover':
             return `0 0 660.51 780.1`;
         case 'candy':
-            return `0 0 128 128`;
+            return `0 0 200 200`;
         case 'ghost':
             return `0 0 399 432.23`;
         case 'turkey':
@@ -1194,6 +1364,8 @@ export function svgViewBox(icon){
             return `0 0 24 24`;
         case 'skull':
             return `0 0 256.27 300.86`;
+        case 'taijitu':
+            return `0 -10 256 256 `;
         case 'pizza':
             return `0 0 217.444 144.397`;
         case 'trash':
@@ -1212,6 +1384,8 @@ export function svgViewBox(icon){
             return `0 0 128 128`;
         case 'turtle':
             return `20 40 270 50`;
+        case 'candycorn':
+            return `0 0 325 449.98`;
     }
 }
 
@@ -1228,6 +1402,8 @@ export function getBaseIcon(name,type){
                 return 'trash';
             case 'demon_slayer':
                 return 'skull';
+            case 'equilibrium':
+                return 'taijitu';
             case 'utopia':
                 return 'martini';
             case 'energetic':
@@ -1246,6 +1422,8 @@ export function getBaseIcon(name,type){
                 return 'egg';
             case 'halloween':
                 return 'ghost';
+            case 'trickortreat':
+                return 'candy';
             case 'thanksgiving':
                 return 'turkey';
             case 'xmas':
@@ -1257,18 +1435,18 @@ export function getBaseIcon(name,type){
     return global.settings.icon;
 }
 
-export function drawIcon(icon,size,shade,id){
+export function drawIcon(icon,size,shade,id,inject){
     let select = '';
     if (id){
         select = `id="${id}" `;
     }
-    return `<span ${select}class="flair drawnIcon"><svg class="star${shade}" version="1.1" x="0px" y="0px" width="${size}px" height="${size}px" viewBox="${svgViewBox(icon)}" xml:space="preserve">${svgIcons(icon)}</svg></span>`;
+    return `<span ${inject}${select}class="flair drawnIcon"><svg class="star${shade}" version="1.1" x="0px" y="0px" width="${size}px" height="${size}px" viewBox="${svgViewBox(icon)}" xml:space="preserve">${svgIcons(icon)}</svg></span>`;
 }
 
 export function easterEgg(num,size){
     let easter = getEaster();
     if (easter.active && !global.special.egg[`egg${num}`]){
-        return drawIcon('egg', size ? size : 16, 2, `egg${num}`);
+        return drawIcon('egg', size ? size : 16, 2, `egg${num}`, `role="button" aria-label="Egg" `);
     }
     return '';
 }
@@ -1300,18 +1478,92 @@ export function easterEggBind(id){
     });
 }
 
-export function format_emblem(achieve,size,baseIcon,fool){
+export function trickOrTreat(num,size){
+    let halloween = getHalloween();
+    if (halloween.active && !global.special.trick[`trick${num}`]){
+        let label = num > 6 ? `Ghost`: `Candy Corn`;
+        return drawIcon(num <= 6 ? 'candycorn' : 'ghost', size ? size : 16, 2, `trick${num}`, `role="button" aria-label="${label}" `);
+    }
+    return '';
+}
+
+export function trickOrTreatBind(id){
+    $(`#trick${id}`).click(function(){
+        if (!global.special.trick[`trick${id}`]){
+            global.special.trick[`trick${id}`] = true;
+            if (id <= 6){
+                if (global.race.universe === 'antimatter'){
+                    global.race.Plasmid.anti += 15;
+                    global.stats.antiplasmid += 15;
+                    messageQueue(loc('city_trick_msg',[15,loc('resource_AntiPlasmid_plural_name')]),'success');
+                }
+                else {
+                    global.race.Plasmid.count += 15;
+                    global.stats.plasmid += 15;
+                    messageQueue(loc('city_trick_msg',[15,loc('resource_Plasmid_plural_name')]),'success');
+                }
+            }
+            else {
+                global.race.Phage.count += 2;
+                global.stats.phage += 2;
+                messageQueue(loc('city_ghost_msg',[2,loc('resource_Phage_name')]),'success');
+            }
+            $(`#trick${id}`).remove();
+            setTimeout(function(){
+                if (id === 7){
+                    if (poppers[`popcity-garrison}`]){
+                        poppers[`popcity-garrison`].destroy();
+                    }
+                    $('.popper').hide();
+                }
+            }, 250);
+        }
+    });
+}
+
+function single_emblem(achieve,size,icon,iconName,fool,universeAffix){
+    return global.stats.achieve[achieve] && (fool ? global.stats.achieve[achieve][universeAffix] - 1 : global.stats.achieve[achieve][universeAffix]) > 1 ? `<p class="flair" title="${sLevel(global.stats.achieve[achieve][universeAffix])} ${iconName}"><svg class="star${fool ? global.stats.achieve[achieve][universeAffix] - 1 : global.stats.achieve[achieve][universeAffix]}" version="1.1" x="0px" y="0px" width="${size}px" height="${size}px" viewBox="${svgViewBox(icon)}" xml:space="preserve">${svgIcons(icon)}</svg></p>` : '';
+}
+
+export function format_emblem(achieve,size,baseIcon,fool,universe){
     if (!size){
         size = 10;
     }
     if (!baseIcon){
         baseIcon = getBaseIcon(achieve,'achievement');
     }
-    let emblem = global.stats.achieve[achieve] && (fool ? global.stats.achieve[achieve].l - 1 : global.stats.achieve[achieve].l) > 1 ? `<p class="flair" title="${sLevel(global.stats.achieve[achieve].l)} ${loc(global.settings.icon)}"><svg class="star${fool ? global.stats.achieve[achieve].l - 1 : global.stats.achieve[achieve].l}" version="1.1" x="0px" y="0px" width="${size}px" height="${size}px" viewBox="${svgViewBox(baseIcon)}" xml:space="preserve">${svgIcons(baseIcon)}</svg></p>` : '';
-    emblem = emblem + (global.stats.achieve[achieve] && (fool ? global.stats.achieve[achieve].a - 1 : global.stats.achieve[achieve].a) > 1 ? `<p class="flair" title="${sLevel(global.stats.achieve[achieve].a)} ${loc('universe_antimatter')}"><svg class="star${fool ? global.stats.achieve[achieve].a - 1 : global.stats.achieve[achieve].a}" version="1.1" x="0px" y="0px" width="${size}px" height="${size}px" viewBox="${svgViewBox('atom')}" xml:space="preserve">${svgIcons('atom')}</svg></p>` : '');
-    emblem = emblem + (global.stats.achieve[achieve] && (fool ? global.stats.achieve[achieve].e - 1 : global.stats.achieve[achieve].e) > 1 ? `<p class="flair" title="${sLevel(global.stats.achieve[achieve].e)} ${loc('universe_evil')}"><svg class="star${fool ? global.stats.achieve[achieve].e - 1 : global.stats.achieve[achieve].e}" version="1.1" x="0px" y="0px" width="${size}px" height="${size}px" viewBox="${svgViewBox('evil')}" xml:space="preserve">${svgIcons('evil')}</svg></p>` : '');
-    emblem = emblem + (global.stats.achieve[achieve] && (fool ? global.stats.achieve[achieve].h - 1 : global.stats.achieve[achieve].h) > 1 ? `<p class="flair" title="${sLevel(global.stats.achieve[achieve].h)} ${loc('universe_heavy')}"><svg class="star${fool ? global.stats.achieve[achieve].h - 1 : global.stats.achieve[achieve].h}" version="1.1" x="0px" y="0px" width="${size}px" height="${size}px" viewBox="${svgViewBox('heavy')}" xml:space="preserve">${svgIcons('heavy')}</svg></p>` : '');
-    emblem = emblem + (global.stats.achieve[achieve] && (fool ? global.stats.achieve[achieve].m - 1 : global.stats.achieve[achieve].m) > 1 ? `<p class="flair" title="${sLevel(global.stats.achieve[achieve].m)} ${loc('universe_micro')}"><svg class="star${fool ? global.stats.achieve[achieve].m - 1 : global.stats.achieve[achieve].m}" version="1.1" x="0px" y="0px" width="${size}px" height="${size}px" viewBox="${svgViewBox('micro')}" xml:space="preserve">${svgIcons('micro')}</svg></p>` : '');
+    let emblem = ``
+    if (!universe){
+        emblem = emblem + single_emblem(achieve,size,baseIcon,loc(global.settings.icon),fool,'l');
+        emblem = emblem + single_emblem(achieve,size,'atom',loc('universe_antimatter'),fool,'a');
+        emblem = emblem + single_emblem(achieve,size,'evil',loc('universe_evil'),fool,'e');
+        emblem = emblem + single_emblem(achieve,size,'heavy',loc('universe_heavy'),fool,'h');
+        emblem = emblem + single_emblem(achieve,size,'micro',loc('universe_micro'),fool,'m');
+        emblem = emblem + single_emblem(achieve,size,'magic',loc('universe_magic'),fool,'mg');
+    }
+    else {
+        switch (universe){
+            case 'standard':
+                emblem = emblem + single_emblem(achieve,size,baseIcon,loc(global.settings.icon),fool,'l');
+                break;
+            case 'antimatter':
+                emblem = emblem + single_emblem(achieve,size,'atom',loc('universe_antimatter'),fool,'a');
+                break;
+            case 'evil':
+                emblem = emblem + single_emblem(achieve,size,'evil',loc('universe_evil'),fool,'e');
+                break;
+            case 'heavy':
+                emblem = emblem + single_emblem(achieve,size,'heavy',loc('universe_heavy'),fool,'h');
+                break;
+            case 'micro':
+                emblem = emblem + single_emblem(achieve,size,'micro',loc('universe_micro'),fool,'m');
+                break;
+            case 'magic':
+                emblem = emblem + single_emblem(achieve,size,'magic',loc('universe_magic'),fool,'mg');
+                break;
+        }
+    }
+
     return emblem;
 }
 
@@ -1339,10 +1591,9 @@ export function calcGenomeScore(genome){
     let genes = 0;
 
     if (global.stats.achieve[`ascended`]){
-        let types = ['l','a','h','e','m'];
-        for (let i=0; i<types.length; i++){
-            if (global.stats.achieve.ascended.hasOwnProperty(types[i])){
-                genes += global.stats.achieve.ascended[types[i]];
+        for (let i=0; i<universe_affixes.length; i++){
+            if (global.stats.achieve.ascended.hasOwnProperty(universe_affixes[i])){
+                genes += global.stats.achieve.ascended[universe_affixes[i]];
             }
         }
     }
@@ -1370,6 +1621,114 @@ export function calcGenomeScore(genome){
     return genes;
 }
 
+export function vacuumCollapse(){
+    if (global.tech.syphon >= 80 && global.race.universe === 'magic'){
+        global.tech.syphon = 79;
+        global.arpa.syphon.rank = 79;
+        global.arpa.syphon.complete = 99;
+        global.queue.queue = [];
+
+        save.setItem('evolveBak',LZString.compressToUTF16(JSON.stringify(global)));
+        global.lastMsg = false;
+
+        unlockAchieve(`extinct_${global.race.species}`);
+        unlockAchieve(`pw_apocalypse`);
+
+        if (!global.race['modified'] && global.race.species === 'balorg'){
+            unlockAchieve('pass');
+        }
+        if (global.race.species === 'junker'){
+            unlockFeat('the_misery');
+        }
+        if (global.race['decay']){
+            unlockAchieve(`dissipated`);
+        }
+        if (global.race['steelen']){
+            unlockFeat('steelem');
+        }
+
+        let god = global.race.species;
+        let old_god = global.race.gods;
+        let orbit = global.city.calendar.orbit;
+        let biome = global.city.biome;
+        let atmo = global.city.ptrait;
+        let plasmid = global.race.Plasmid.count;
+        let antiplasmid = global.race.Plasmid.anti;
+        let phage = global.race.Phage.count;
+        let dark = global.race.Dark.count;
+
+        let gains = calcPrestige('vacuum');
+        let new_plasmid = gains.plasmid;
+        let new_phage = gains.phage;
+        let new_dark = gains.dark;
+
+        checkAchievements();
+
+        phage += new_phage;
+        global.stats.reset++;
+        global.stats.blackhole++;
+        global.stats.tdays += global.stats.days;
+        global.stats.days = 0;
+        global.stats.tknow += global.stats.know;
+        global.stats.know = 0;
+        global.stats.tstarved += global.stats.starved;
+        global.stats.starved = 0;
+        global.stats.tdied += global.stats.died;
+        global.stats.died = 0;
+        if (global.race.universe === 'antimatter'){
+            antiplasmid += new_plasmid;
+            global.stats.antiplasmid += new_plasmid;
+        }
+        else {
+            plasmid += new_plasmid;
+            global.stats.plasmid += new_plasmid;
+        }
+        global.stats.phage += new_phage;
+        global.stats.dark = +(global.stats.dark + new_dark).toFixed(3);
+        global.stats.universes++;
+
+        let corruption = global.race.hasOwnProperty('corruption') && global.race.corruption > 1 ? global.race.corruption - 1 : 0;
+        global['race'] = {
+            species : 'protoplasm',
+            gods: god,
+            old_gods: old_god,
+            Plasmid: { count: plasmid, anti: antiplasmid },
+            Phage: { count: phage },
+            Dark: { count: +(dark + new_dark).toFixed(3) },
+            Harmony: { count: global.race.Harmony.count },
+            universe: 'bigbang',
+            seeded: true,
+            bigbang: true,
+            probes: 4,
+            seed: Math.floor(Math.seededRandom(10000)),
+            ascended: false,
+        };
+        if (corruption > 0){
+            global.race['corruption'] = corruption;
+        }
+        global.city = {
+            calendar: {
+                day: 0,
+                year: 0,
+                weather: 2,
+                temp: 1,
+                moon: 0,
+                wind: 0,
+                orbit: orbit
+            },
+            biome: biome,
+            ptrait: atmo
+        };
+        global.tech = { theology: 1 };
+        clearStates();
+        global.new = true;
+        Math.seed = Math.rand(0,10000);
+        global.seed = Math.seed;
+
+        save.setItem('evolved',LZString.compressToUTF16(JSON.stringify(global)));
+        window.location.reload();
+    }
+}
 
 export function deepClone(obj){
     //in case of premitives
@@ -1397,7 +1756,7 @@ export function deepClone(obj){
         if(obj.hasOwnProperty(prop)){
             clonedObj[prop] = deepClone(obj[prop]);
         }
-    } 
+    }
     return clonedObj;
 }
 
@@ -1426,6 +1785,10 @@ export function getEaster(){
         endDate: [month-1,day]
     };
 
+    if (global.settings.boring){
+        return easter;
+    }
+
     easter.endDate[1] += 10;
     if ((easter.endDate[0] === 2 && easter.endDate[1] > 31) || (easter.endDate[0] === 3 && easter.endDate[1] > 30)){
         easter.endDate[1] -= easter.endDate[0] === 2 ? 31 : 30;
@@ -1436,5 +1799,57 @@ export function getEaster(){
     }
 
     return easter;
+}
 
+export function getHalloween(){
+    let halloween = {
+        date: [9,28],
+        active: false,
+        endDate: [10,4]
+    };
+
+    if (global.settings.boring){
+        return halloween;
+    }
+
+    const date = new Date();
+
+    if ((date.getMonth() === halloween.date[0] && date.getDate() >= halloween.date[1]) || (date.getMonth() === halloween.endDate[0] && date.getDate() <= halloween.endDate[1])){
+        halloween.active = true;
+    }
+
+    return halloween;
+}
+
+export function shrineBonusActive() {
+	return (global.race['magnificent'] && global.city.hasOwnProperty('shrine') && global.city.shrine.count > 0);
+}
+
+export function getShrineBonus(type) {
+	let shrine_bonus = {
+		mult: 1,
+		add: 0
+	};
+
+	if (shrineBonusActive()){
+		switch(type){
+			case 'metal':
+				shrine_bonus.mult += +(global.city.shrine.metal / 100);
+				break;
+			case 'tax':
+				shrine_bonus.mult += +(global.city.shrine.tax / 100);
+				break;
+			case 'know':
+                shrine_bonus.add += +(global.city.shrine.know * 400);
+                shrine_bonus.mult += +(global.city.shrine.know * 3 / 100);
+				break;
+			case 'morale':
+				shrine_bonus.add += global.city.shrine.morale;
+				break;
+			default:
+				break;
+		}
+	}
+
+	return shrine_bonus;
 }
